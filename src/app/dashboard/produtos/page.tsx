@@ -86,6 +86,100 @@ export default function ProdutosPage() {
   const [isSavingProduct, setIsSavingProduct] = useState(false);
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
 
+  // Variations State
+  const [hasVariations, setHasVariations] = useState(false);
+  const [attribute1Name, setAttribute1Name] = useState("Cor");
+  const [attribute1Values, setAttribute1Values] = useState("");
+  const [attribute2Name, setAttribute2Name] = useState("Tamanho");
+  const [attribute2Values, setAttribute2Values] = useState("");
+
+  interface VariantFormItem {
+    id?: string;
+    attributes: Record<string, string>;
+    sku: string;
+    barcode: string;
+    cost_price: string;
+    sale_price: string;
+    stock_quantity: string;
+    min_stock: string;
+    is_active: boolean;
+  }
+  const [variantsFormList, setVariantsFormList] = useState<VariantFormItem[]>([]);
+
+  const generateCombinations = useCallback(() => {
+    const attr1NameClean = attribute1Name.trim().toLowerCase();
+    const attr2NameClean = attribute2Name.trim().toLowerCase();
+    
+    const attr1Vals = attribute1Values
+      .split(",")
+      .map((v) => v.trim())
+      .filter((v) => v !== "");
+      
+    const attr2Vals = attribute2Values
+      .split(",")
+      .map((v) => v.trim())
+      .filter((v) => v !== "");
+
+    if (attr1Vals.length === 0 && attr2Vals.length === 0) {
+      setVariantsFormList([]);
+      return;
+    }
+
+    // Generate combinations
+    const combinations: Record<string, string>[] = [];
+    if (attr1Vals.length > 0 && attr2Vals.length > 0) {
+      attr1Vals.forEach((v1) => {
+        attr2Vals.forEach((v2) => {
+          combinations.push({
+            [attr1NameClean]: v1,
+            [attr2NameClean]: v2,
+          });
+        });
+      });
+    } else if (attr1Vals.length > 0) {
+      attr1Vals.forEach((v1) => {
+        combinations.push({
+          [attr1NameClean]: v1,
+        });
+      });
+    } else if (attr2Vals.length > 0) {
+      attr2Vals.forEach((v2) => {
+        combinations.push({
+          [attr2NameClean]: v2,
+        });
+      });
+    }
+
+    setVariantsFormList((prev) => {
+      return combinations.map((combo) => {
+        // Try to match with existing in prev
+        const existing = prev.find((p) => {
+          return Object.keys(combo).every((key) => p.attributes[key] === combo[key]);
+        });
+
+        if (existing) return existing;
+
+        // Auto-generate SKU
+        const suffix = Object.values(combo)
+          .map((v) => v.toUpperCase().substring(0, 3))
+          .join("-");
+        const parentSku = productForm.sku || "";
+        const suggestedSku = parentSku ? `${parentSku}-${suffix}` : "";
+
+        return {
+          attributes: combo,
+          sku: suggestedSku,
+          barcode: "",
+          cost_price: productForm.cost_price || "0",
+          sale_price: productForm.sale_price || "0",
+          stock_quantity: "0",
+          min_stock: "0",
+          is_active: true,
+        };
+      });
+    });
+  }, [attribute1Name, attribute1Values, attribute2Name, attribute2Values, productForm.sku, productForm.cost_price, productForm.sale_price]);
+
   // Helper to convert File to base64
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -271,17 +365,27 @@ export default function ProdutosPage() {
   }, [fetchData]);
 
   // Filter Products
-  const filteredProducts = products.filter((prod) => {
-    const matchesSearch =
-      prod.name.toLowerCase().includes(search.toLowerCase()) ||
-      prod.sku?.toLowerCase().includes(search.toLowerCase()) ||
-      prod.barcode?.toLowerCase().includes(search.toLowerCase());
+  const filteredProducts = products
+    .filter((p) => !p.parent_id)
+    .filter((prod) => {
+      const children = products.filter((p) => p.parent_id === prod.id);
+      const matchesChildren = children.some(
+        (c) =>
+          c.sku?.toLowerCase().includes(search.toLowerCase()) ||
+          c.barcode?.toLowerCase().includes(search.toLowerCase())
+      );
 
-    const matchesCategory =
-      selectedCategory === "all" || prod.category_id === selectedCategory;
+      const matchesSearch =
+        prod.name.toLowerCase().includes(search.toLowerCase()) ||
+        prod.sku?.toLowerCase().includes(search.toLowerCase()) ||
+        prod.barcode?.toLowerCase().includes(search.toLowerCase()) ||
+        matchesChildren;
 
-    return matchesSearch && matchesCategory;
-  });
+      const matchesCategory =
+        selectedCategory === "all" || prod.category_id === selectedCategory;
+
+      return matchesSearch && matchesCategory;
+    });
 
   // Open Dialog to Create Product
   function handleAddProduct() {
@@ -300,6 +404,15 @@ export default function ProdutosPage() {
       is_active: true,
     });
     resetImageState(null);
+    
+    // Reset variations states
+    setHasVariations(false);
+    setAttribute1Name("Cor");
+    setAttribute1Values("");
+    setAttribute2Name("Tamanho");
+    setAttribute2Values("");
+    setVariantsFormList([]);
+
     setIsProductDialogOpen(true);
   }
 
@@ -307,6 +420,55 @@ export default function ProdutosPage() {
   function handleEditProduct(product: Product) {
     setEditingProduct(product);
     resetImageState(product.image_url);
+    
+    // Find variants in products state
+    const dbVariants = products.filter((p) => p.parent_id === product.id);
+    
+    if (dbVariants.length > 0) {
+      setHasVariations(true);
+      
+      const attrKeys = Array.from(
+        new Set(dbVariants.flatMap((v) => Object.keys(v.attributes || {})))
+      );
+      
+      const attr1Key = attrKeys[0] || "cor";
+      const attr2Key = attrKeys[1] || "tamanho";
+      
+      setAttribute1Name(attr1Key.charAt(0).toUpperCase() + attr1Key.slice(1));
+      setAttribute2Name(attr2Key.charAt(0).toUpperCase() + attr2Key.slice(1));
+      
+      const attr1Vals = Array.from(
+        new Set(dbVariants.map((v) => v.attributes?.[attr1Key] || "").filter(Boolean))
+      );
+      const attr2Vals = Array.from(
+        new Set(dbVariants.map((v) => v.attributes?.[attr2Key] || "").filter(Boolean))
+      );
+      
+      setAttribute1Values(attr1Vals.join(", "));
+      setAttribute2Values(attr2Vals.join(", "));
+      
+      setVariantsFormList(
+        dbVariants.map((v) => ({
+          id: v.id,
+          attributes: v.attributes as Record<string, string>,
+          sku: v.sku || "",
+          barcode: v.barcode || "",
+          cost_price: v.cost_price.toString(),
+          sale_price: v.sale_price.toString(),
+          stock_quantity: v.stock_quantity.toString(),
+          min_stock: v.min_stock.toString(),
+          is_active: v.is_active,
+        }))
+      );
+    } else {
+      setHasVariations(false);
+      setAttribute1Name("Cor");
+      setAttribute1Values("");
+      setAttribute2Name("Tamanho");
+      setAttribute2Values("");
+      setVariantsFormList([]);
+    }
+
     setProductForm({
       name: product.name,
       description: product.description || "",
@@ -423,19 +585,23 @@ export default function ProdutosPage() {
         category_id: productForm.category_id || null,
         cost_price: parseFloat(productForm.cost_price) || 0,
         sale_price: parseFloat(productForm.sale_price) || 0,
-        stock_quantity: parseInt(productForm.stock_quantity) || 0,
-        min_stock: parseInt(productForm.min_stock) || 0,
+        stock_quantity: hasVariations ? 0 : (parseInt(productForm.stock_quantity) || 0),
+        min_stock: hasVariations ? 0 : (parseInt(productForm.min_stock) || 0),
         unit: productForm.unit,
         is_active: productForm.is_active,
         image_url: imageUrl,
+        parent_id: null,
+        attributes: null,
       };
 
+      let parentId = "";
+
       if (editingProduct) {
-        // Update
+        parentId = editingProduct.id;
         const { error } = await supabase
           .from("products")
           .update(payload)
-          .eq("id", editingProduct.id);
+          .eq("id", parentId);
 
         if (error) throw error;
 
@@ -447,15 +613,88 @@ export default function ProdutosPage() {
         ) {
           await removeImageFromBucket(currentImageUrl);
         }
-        toast.success("Produto atualizado com sucesso!");
       } else {
-        // Create
-        const { error } = await supabase.from("products").insert(payload);
+        // Create parent
+        const { data, error } = await supabase
+          .from("products")
+          .insert(payload)
+          .select()
+          .single();
 
         if (error) throw error;
-        toast.success("Produto cadastrado com sucesso!");
+        parentId = data.id;
       }
 
+      // Handle Variations
+      if (hasVariations) {
+        // Fetch current variants in database
+        const { data: dbVariants } = await supabase
+          .from("products")
+          .select("id")
+          .eq("parent_id", parentId);
+
+        const dbVariantIds = (dbVariants as { id: string }[] | null)?.map((v) => v.id) || [];
+        const currentFormVariantIds = variantsFormList.map((v) => v.id).filter(Boolean) as string[];
+
+        // 1. Delete variants that are no longer in the form list
+        const idsToDelete = dbVariantIds.filter((id) => !currentFormVariantIds.includes(id));
+        if (idsToDelete.length > 0) {
+          const { error: delError } = await supabase
+            .from("products")
+            .delete()
+            .in("id", idsToDelete);
+          if (delError) throw delError;
+        }
+
+        // 2. Insert or update variants
+        for (const variant of variantsFormList) {
+          const attrValuesStr = Object.values(variant.attributes).join(" / ");
+          const variantName = `${productForm.name} - ${attrValuesStr}`;
+
+          const variantPayload = {
+            name: variantName,
+            description: productForm.description || null,
+            sku: variant.sku || null,
+            barcode: variant.barcode || null,
+            category_id: productForm.category_id || null,
+            cost_price: parseFloat(variant.cost_price) || 0,
+            sale_price: parseFloat(variant.sale_price) || 0,
+            stock_quantity: parseInt(variant.stock_quantity) || 0,
+            min_stock: parseInt(variant.min_stock) || 0,
+            unit: productForm.unit,
+            is_active: variant.is_active,
+            image_url: imageUrl,
+            parent_id: parentId,
+            attributes: variant.attributes,
+          };
+
+          if (variant.id) {
+            // Update existing variant
+            const { error: variantError } = await supabase
+              .from("products")
+              .update(variantPayload)
+              .eq("id", variant.id);
+            if (variantError) throw variantError;
+          } else {
+            // Create new variant
+            const { error: variantError } = await supabase
+              .from("products")
+              .insert(variantPayload);
+            if (variantError) throw variantError;
+          }
+        }
+      } else {
+        // If product is no longer variable, clean up any database variations
+        if (editingProduct) {
+          const { error: cleanupError } = await supabase
+            .from("products")
+            .delete()
+            .eq("parent_id", parentId);
+          if (cleanupError) throw cleanupError;
+        }
+      }
+
+      toast.success(editingProduct ? "Produto atualizado com sucesso!" : "Produto cadastrado com sucesso!");
       setIsProductDialogOpen(false);
       fetchData();
     } catch (error: any) {
@@ -629,7 +868,38 @@ export default function ProdutosPage() {
               </TableHeader>
               <TableBody>
                 {filteredProducts.map((prod) => {
-                  const isLowStock = prod.stock_quantity <= prod.min_stock;
+                  const children = products.filter((p) => p.parent_id === prod.id);
+                  const hasVariants = children.length > 0;
+
+                  // Stock calculations
+                  const totalStock = hasVariants
+                    ? children.reduce((sum, v) => sum + v.stock_quantity, 0)
+                    : prod.stock_quantity;
+                  const totalMinStock = hasVariants
+                    ? children.reduce((sum, v) => sum + v.min_stock, 0)
+                    : prod.min_stock;
+                  const isLowStock = totalStock <= totalMinStock;
+
+                  // Price calculations
+                  const costPrices = children.map((c) => c.cost_price);
+                  const salePrices = children.map((c) => c.sale_price);
+
+                  const minCost = hasVariants ? Math.min(...costPrices) : prod.cost_price;
+                  const maxCost = hasVariants ? Math.max(...costPrices) : prod.cost_price;
+                  const costPriceStr = hasVariants
+                    ? minCost === maxCost
+                      ? `R$ ${minCost.toFixed(2)}`
+                      : `R$ ${minCost.toFixed(2)} - R$ ${maxCost.toFixed(2)}`
+                    : `R$ ${prod.cost_price.toFixed(2)}`;
+
+                  const minSale = hasVariants ? Math.min(...salePrices) : prod.sale_price;
+                  const maxSale = hasVariants ? Math.max(...salePrices) : prod.sale_price;
+                  const salePriceStr = hasVariants
+                    ? minSale === maxSale
+                      ? `R$ ${minSale.toFixed(2)}`
+                      : `R$ ${minSale.toFixed(2)} - R$ ${maxSale.toFixed(2)}`
+                    : `R$ ${prod.sale_price.toFixed(2)}`;
+
                   return (
                     <TableRow key={prod.id} className="hover:bg-muted/30">
                       <TableCell className="font-medium">
@@ -651,7 +921,14 @@ export default function ProdutosPage() {
                             )}
                           </div>
                           <div>
-                            <p className="font-semibold">{prod.name}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="font-semibold">{prod.name}</p>
+                              {hasVariants && (
+                                <Badge variant="secondary" className="text-[10px] bg-purple-500/10 text-purple-600 border-purple-500/20 font-bold px-1.5 py-0.5">
+                                  {children.length} var.
+                                </Badge>
+                              )}
+                            </div>
                             {prod.description && (
                               <p className="text-xs text-muted-foreground line-clamp-1">
                                 {prod.description}
@@ -661,11 +938,15 @@ export default function ProdutosPage() {
                         </div>
                       </TableCell>
                       <TableCell className="text-sm font-mono text-muted-foreground">
-                        <div className="space-y-0.5">
-                          {prod.sku && <p>SKU: {prod.sku}</p>}
-                          {prod.barcode && <p>BC: {prod.barcode}</p>}
-                          {!prod.sku && !prod.barcode && <p className="text-xs italic">-</p>}
-                        </div>
+                        {hasVariants ? (
+                          <span className="text-xs text-muted-foreground italic">Grade de variação</span>
+                        ) : (
+                          <div className="space-y-0.5">
+                            {prod.sku && <p>SKU: {prod.sku}</p>}
+                            {prod.barcode && <p>BC: {prod.barcode}</p>}
+                            {!prod.sku && !prod.barcode && <p className="text-xs italic">-</p>}
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell>
                         {prod.category ? (
@@ -687,7 +968,7 @@ export default function ProdutosPage() {
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1.5 font-semibold">
                           <span className={isLowStock ? "text-amber-500" : ""}>
-                            {prod.stock_quantity} {prod.unit}
+                            {totalStock} {prod.unit}
                           </span>
                           {isLowStock && (
                             <span title="Estoque baixo!">
@@ -697,10 +978,10 @@ export default function ProdutosPage() {
                         </div>
                       </TableCell>
                       <TableCell className="text-right font-medium">
-                        R$ {prod.cost_price.toFixed(2)}
+                        {costPriceStr}
                       </TableCell>
                       <TableCell className="text-right font-semibold text-indigo-500">
-                        R$ {prod.sale_price.toFixed(2)}
+                        {salePriceStr}
                       </TableCell>
                       <TableCell className="text-center">
                         <Badge
@@ -851,25 +1132,43 @@ export default function ProdutosPage() {
                 </div>
               </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor="sku">SKU (Código Único)</Label>
-                <Input
-                  id="sku"
-                  placeholder="EX: BEB-COCA-350"
-                  value={productForm.sku}
-                  onChange={(e) => setProductForm({ ...productForm, sku: e.target.value })}
+              {/* Checkbox Variações */}
+              <div className="col-span-2 flex items-center gap-2 border-y py-2.5 my-1">
+                <input
+                  type="checkbox"
+                  id="has_variations"
+                  checked={hasVariations}
+                  onChange={(e) => setHasVariations(e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                 />
+                <Label htmlFor="has_variations" className="font-bold cursor-pointer select-none text-indigo-600 dark:text-indigo-400">
+                  Este produto possui variações (Grade de Tamanho, Cor, etc.)
+                </Label>
               </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor="barcode">Código de Barras</Label>
-                <Input
-                  id="barcode"
-                  placeholder="EAN-13"
-                  value={productForm.barcode}
-                  onChange={(e) => setProductForm({ ...productForm, barcode: e.target.value })}
-                />
-              </div>
+              {!hasVariations && (
+                <>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="sku">SKU (Código Único)</Label>
+                    <Input
+                      id="sku"
+                      placeholder="EX: BEB-COCA-350"
+                      value={productForm.sku}
+                      onChange={(e) => setProductForm({ ...productForm, sku: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="barcode">Código de Barras</Label>
+                    <Input
+                      id="barcode"
+                      placeholder="EAN-13"
+                      value={productForm.barcode}
+                      onChange={(e) => setProductForm({ ...productForm, barcode: e.target.value })}
+                    />
+                  </div>
+                </>
+              )}
 
               <div className="space-y-1.5">
                 <Label htmlFor="category_id">Categoria *</Label>
@@ -909,54 +1208,237 @@ export default function ProdutosPage() {
                 </Select>
               </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor="cost_price">Preço de Custo (R$) *</Label>
-                <Input
-                  id="cost_price"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={productForm.cost_price}
-                  onChange={(e) => setProductForm({ ...productForm, cost_price: e.target.value })}
-                  required
-                />
-              </div>
+              {!hasVariations && (
+                <>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="cost_price">Preço de Custo (R$) *</Label>
+                    <Input
+                      id="cost_price"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={productForm.cost_price}
+                      onChange={(e) => setProductForm({ ...productForm, cost_price: e.target.value })}
+                      required
+                    />
+                  </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor="sale_price">Preço de Venda (R$) *</Label>
-                <Input
-                  id="sale_price"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={productForm.sale_price}
-                  onChange={(e) => setProductForm({ ...productForm, sale_price: e.target.value })}
-                  required
-                />
-              </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="sale_price">Preço de Venda (R$) *</Label>
+                    <Input
+                      id="sale_price"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={productForm.sale_price}
+                      onChange={(e) => setProductForm({ ...productForm, sale_price: e.target.value })}
+                      required
+                    />
+                  </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor="stock_quantity">Qtd. Estoque Atual *</Label>
-                <Input
-                  id="stock_quantity"
-                  type="number"
-                  min="0"
-                  value={productForm.stock_quantity}
-                  onChange={(e) => setProductForm({ ...productForm, stock_quantity: e.target.value })}
-                  required
-                />
-              </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="stock_quantity">Qtd. Estoque Atual *</Label>
+                    <Input
+                      id="stock_quantity"
+                      type="number"
+                      min="0"
+                      value={productForm.stock_quantity}
+                      onChange={(e) => setProductForm({ ...productForm, stock_quantity: e.target.value })}
+                      required
+                    />
+                  </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor="min_stock">Qtd. Estoque Mínimo</Label>
-                <Input
-                  id="min_stock"
-                  type="number"
-                  min="0"
-                  value={productForm.min_stock}
-                  onChange={(e) => setProductForm({ ...productForm, min_stock: e.target.value })}
-                />
-              </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="min_stock">Qtd. Estoque Mínimo</Label>
+                    <Input
+                      id="min_stock"
+                      type="number"
+                      min="0"
+                      value={productForm.min_stock}
+                      onChange={(e) => setProductForm({ ...productForm, min_stock: e.target.value })}
+                    />
+                  </div>
+                </>
+              )}
+
+              {hasVariations && (
+                <div className="col-span-2 space-y-4 border p-4 rounded-xl bg-muted/20">
+                  <h4 className="text-sm font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5">
+                    <Sparkles className="h-4 w-4" />
+                    Configuração de Atributos da Grade
+                  </h4>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="attr1-name" className="text-xs font-semibold">Atributo 1 (ex: Cor)</Label>
+                      <Input
+                        id="attr1-name"
+                        value={attribute1Name}
+                        onChange={(e) => setAttribute1Name(e.target.value)}
+                        placeholder="Ex: Cor"
+                        className="h-8 text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="attr1-values" className="text-xs font-semibold">Valores (separados por vírgula)</Label>
+                      <Input
+                        id="attr1-values"
+                        value={attribute1Values}
+                        onChange={(e) => setAttribute1Values(e.target.value)}
+                        placeholder="Ex: Preta, Branca, Azul"
+                        className="h-8 text-xs"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="attr2-name" className="text-xs font-semibold">Atributo 2 (ex: Tamanho)</Label>
+                      <Input
+                        id="attr2-name"
+                        value={attribute2Name}
+                        onChange={(e) => setAttribute2Name(e.target.value)}
+                        placeholder="Ex: Tamanho"
+                        className="h-8 text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="attr2-values" className="text-xs font-semibold">Valores (separados por vírgula)</Label>
+                      <Input
+                        id="attr2-values"
+                        value={attribute2Values}
+                        onChange={(e) => setAttribute2Values(e.target.value)}
+                        placeholder="Ex: P, M, G"
+                        className="h-8 text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={generateCombinations}
+                    className="w-full text-xs h-8 border-indigo-200 hover:bg-indigo-50 font-semibold"
+                  >
+                    Gerar / Atualizar Grade de Variações
+                  </Button>
+
+                  {variantsFormList.length > 0 && (
+                    <div className="space-y-2 pt-2 border-t">
+                      <Label className="text-xs font-bold text-muted-foreground uppercase">Grade Gerada</Label>
+                      <div className="max-h-60 overflow-y-auto border rounded-lg bg-background p-2 space-y-3">
+                        {variantsFormList.map((variant, index) => {
+                          const label = Object.entries(variant.attributes)
+                            .map(([k, v]) => `${k.charAt(0).toUpperCase() + k.slice(1)}: ${v}`)
+                            .join(" / ");
+                          
+                          return (
+                            <div key={index} className="border-b pb-3 last:border-0 last:pb-0 space-y-2">
+                              <div className="flex justify-between items-center bg-muted/30 p-1.5 rounded text-xs font-bold text-muted-foreground">
+                                <span>{label}</span>
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="checkbox"
+                                    id={`active-${index}`}
+                                    checked={variant.is_active}
+                                    onChange={(e) => {
+                                      const updated = [...variantsFormList];
+                                      updated[index].is_active = e.target.checked;
+                                      setVariantsFormList(updated);
+                                    }}
+                                    className="h-3 w-3 rounded text-indigo-600"
+                                  />
+                                  <Label htmlFor={`active-${index}`} className="text-[10px] font-normal cursor-pointer select-none">Ativo</Label>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2 text-xs">
+                                <div className="space-y-1">
+                                  <Label className="text-[10px]">SKU</Label>
+                                  <Input
+                                    value={variant.sku}
+                                    onChange={(e) => {
+                                      const updated = [...variantsFormList];
+                                      updated[index].sku = e.target.value;
+                                      setVariantsFormList(updated);
+                                    }}
+                                    className="h-7 text-xs font-mono"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-[10px]">Cód. Barras</Label>
+                                  <Input
+                                    value={variant.barcode}
+                                    onChange={(e) => {
+                                      const updated = [...variantsFormList];
+                                      updated[index].barcode = e.target.value;
+                                      setVariantsFormList(updated);
+                                    }}
+                                    className="h-7 text-xs font-mono"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-[10px]">Custo (R$)</Label>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    value={variant.cost_price}
+                                    onChange={(e) => {
+                                      const updated = [...variantsFormList];
+                                      updated[index].cost_price = e.target.value;
+                                      setVariantsFormList(updated);
+                                    }}
+                                    className="h-7 text-xs text-right font-semibold"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-[10px]">Venda (R$)</Label>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    value={variant.sale_price}
+                                    onChange={(e) => {
+                                      const updated = [...variantsFormList];
+                                      updated[index].sale_price = e.target.value;
+                                      setVariantsFormList(updated);
+                                    }}
+                                    className="h-7 text-xs text-right font-semibold"
+                                  />
+                                </div>
+                                <div className="space-y-1 col-span-2 grid grid-cols-2 gap-2">
+                                  <div>
+                                    <Label className="text-[10px]">Estoque</Label>
+                                    <Input
+                                      type="number"
+                                      value={variant.stock_quantity}
+                                      onChange={(e) => {
+                                        const updated = [...variantsFormList];
+                                        updated[index].stock_quantity = e.target.value;
+                                        setVariantsFormList(updated);
+                                      }}
+                                      className="h-7 text-xs text-center"
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label className="text-[10px]">Estoque Mín.</Label>
+                                    <Input
+                                      type="number"
+                                      value={variant.min_stock}
+                                      onChange={(e) => {
+                                        const updated = [...variantsFormList];
+                                        updated[index].min_stock = e.target.value;
+                                        setVariantsFormList(updated);
+                                      }}
+                                      className="h-7 text-xs text-center"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="col-span-2 flex items-center gap-2 pt-2">
                 <input

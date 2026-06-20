@@ -79,6 +79,8 @@ export interface Product {
   unit: string;
   created_at: string;
   updated_at: string;
+  parent_id?: string | null;
+  attributes?: Record<string, string> | null;
   // Joined fields
   category?: ProductCategory;
 }

@@ -91,6 +91,11 @@ export default function PDVPage() {
   const [installmentFrequency, setInstallmentFrequency] = useState<"mensal" | "30_dias">("mensal");
   const [generatedInstallments, setGeneratedInstallments] = useState<InstallmentPreview[]>([]);
 
+  // Variant Selection State
+  const [selectedParentProduct, setSelectedParentProduct] = useState<Product | null>(null);
+  const [selectedAttributes, setSelectedAttributes] = useState<Record<string, string>>({});
+  const [isVariantSelectionOpen, setIsVariantSelectionOpen] = useState(false);
+
   // Helper to get default first due date (30 days from now)
   const getDefaultFirstDueDate = () => {
     const date = new Date();
@@ -178,17 +183,42 @@ export default function PDVPage() {
   const selectedCustomer = customers.find((c) => c.id === selectedCustomerId) || null;
 
   // Search filter
-  const filteredProducts = products.filter((prod) => {
-    const matchesSearch =
-      prod.name.toLowerCase().includes(search.toLowerCase()) ||
-      prod.sku?.toLowerCase().includes(search.toLowerCase()) ||
-      prod.barcode?.toLowerCase().includes(search.toLowerCase());
+  const filteredProducts = products
+    .filter((p) => !p.parent_id)
+    .filter((prod) => {
+      const matchesSearch =
+        prod.name.toLowerCase().includes(search.toLowerCase()) ||
+        prod.sku?.toLowerCase().includes(search.toLowerCase()) ||
+        prod.barcode?.toLowerCase().includes(search.toLowerCase());
 
-    const matchesCategory =
-      activeCategory === "all" || prod.category_id === activeCategory;
+      const matchesCategory =
+        activeCategory === "all" || prod.category_id === activeCategory;
 
-    return matchesSearch && matchesCategory;
-  });
+      return matchesSearch && matchesCategory;
+    });
+
+  // Variant helper variables
+  const variantChildren = selectedParentProduct
+    ? products.filter((p) => p.parent_id === selectedParentProduct.id && p.is_active)
+    : [];
+
+  const variantAttrKeys = Array.from(
+    new Set(variantChildren.flatMap((c) => Object.keys(c.attributes || {})))
+  );
+
+  const isAllVariantsSelected = variantAttrKeys.every((key) => !!selectedAttributes[key]);
+
+  const matchedVariant = isAllVariantsSelected
+    ? variantChildren.find((c) =>
+        variantAttrKeys.every((key) => c.attributes?.[key] === selectedAttributes[key])
+      )
+    : null;
+
+  const getValuesForKey = (key: string) => {
+    return Array.from(
+      new Set(variantChildren.map((c) => c.attributes?.[key]).filter((v): v is string => !!v))
+    );
+  };
 
   // Cart operations
   const addToCart = (product: Product) => {
@@ -216,6 +246,17 @@ export default function PDVPage() {
     setTimeout(() => {
       barcodeInputRef.current?.focus();
     }, 50);
+  };
+
+  const handleProductClick = (product: Product) => {
+    const children = products.filter((p) => p.parent_id === product.id && p.is_active);
+    if (children.length > 0) {
+      setSelectedParentProduct(product);
+      setSelectedAttributes({});
+      setIsVariantSelectionOpen(true);
+    } else {
+      addToCart(product);
+    }
   };
 
   const updateQuantity = (productId: string, delta: number) => {
@@ -534,12 +575,25 @@ export default function PDVPage() {
           ) : (
             <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 xl:grid-cols-4">
               {filteredProducts.map((prod) => {
-                const outOfStock = prod.stock_quantity <= 0;
+                const children = products.filter((p) => p.parent_id === prod.id && p.is_active);
+                const hasVariants = children.length > 0;
+
+                const totalStock = hasVariants
+                  ? children.reduce((acc, c) => acc + c.stock_quantity, 0)
+                  : prod.stock_quantity;
+                const minPrice = hasVariants
+                  ? Math.min(...children.map((c) => c.sale_price))
+                  : prod.sale_price;
+                const maxPrice = hasVariants
+                  ? Math.max(...children.map((c) => c.sale_price))
+                  : prod.sale_price;
+                const outOfStock = totalStock <= 0;
+
                 return (
                   <button
                     key={prod.id}
                     disabled={outOfStock}
-                    onClick={() => addToCart(prod)}
+                    onClick={() => handleProductClick(prod)}
                     className={`flex flex-col text-left border bg-card rounded-xl p-3 shadow-sm transition-all duration-200 group relative ${
                       outOfStock
                         ? "opacity-50 cursor-not-allowed bg-muted/40"
@@ -547,9 +601,16 @@ export default function PDVPage() {
                     }`}
                   >
                     <div className="flex-1 space-y-1">
-                      <span className="text-xs text-muted-foreground line-clamp-1">
-                        {prod.sku || "Sem SKU"}
-                      </span>
+                      <div className="flex justify-between items-start gap-1">
+                        <span className="text-xs text-muted-foreground line-clamp-1">
+                          {prod.sku || "Sem SKU"}
+                        </span>
+                        {hasVariants && (
+                          <Badge variant="outline" className="text-[9px] py-0 px-1 border-indigo-400 text-indigo-500 dark:text-indigo-400 font-semibold shrink-0">
+                            Grade
+                          </Badge>
+                        )}
+                      </div>
                       <h4 className="font-semibold text-sm line-clamp-2 leading-snug group-hover:text-indigo-600 transition-colors">
                         {prod.name}
                       </h4>
@@ -559,14 +620,18 @@ export default function PDVPage() {
                       <div className="space-y-0.5">
                         <span className="text-[10px] text-muted-foreground uppercase block font-bold">Venda</span>
                         <span className="text-sm font-extrabold text-indigo-600 dark:text-indigo-400">
-                          R$ {prod.sale_price.toFixed(2)}
+                          {hasVariants && minPrice !== maxPrice ? (
+                            <span className="text-xs">R$ {minPrice.toFixed(2)} - {maxPrice.toFixed(2)}</span>
+                          ) : (
+                            <span>R$ {minPrice.toFixed(2)}</span>
+                          )}
                         </span>
                       </div>
                       <Badge
-                        variant={prod.stock_quantity <= prod.min_stock ? "destructive" : "secondary"}
+                        variant={totalStock <= prod.min_stock ? "destructive" : "secondary"}
                         className="text-[10px] py-0.5 font-bold"
                       >
-                        Estoque: {prod.stock_quantity}
+                        Estoque: {totalStock}
                       </Badge>
                     </div>
                   </button>
@@ -998,6 +1063,147 @@ export default function PDVPage() {
               </DialogFooter>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Variant Selection Dialog */}
+      <Dialog open={isVariantSelectionOpen} onOpenChange={setIsVariantSelectionOpen}>
+        <DialogContent className="max-w-md bg-card border border-muted shadow-2xl rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold flex items-center gap-2">
+              <span className="bg-indigo-500/10 text-indigo-500 p-1.5 rounded-lg">
+                <ShoppingCart className="h-5 w-5" />
+              </span>
+              Selecionar Variação
+            </DialogTitle>
+            <DialogDescription className="text-muted-foreground mt-1 text-sm">
+              Escolha as características do produto para adicionar ao carrinho.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedParentProduct && (
+            <div className="space-y-6 py-4">
+              {/* Product Info Summary */}
+              <div className="flex flex-col gap-1 p-3 rounded-xl bg-muted/30 border">
+                <span className="text-xs text-muted-foreground font-semibold">Produto Principal</span>
+                <span className="font-bold text-base text-foreground">{selectedParentProduct.name}</span>
+                <span className="text-xs text-muted-foreground">SKU Base: {selectedParentProduct.sku || "Sem SKU"}</span>
+              </div>
+
+              {/* Attributes Selectors */}
+              <div className="space-y-4">
+                {variantAttrKeys.map((key) => {
+                  const values = getValuesForKey(key);
+                  const selectedVal = selectedAttributes[key];
+                  return (
+                    <div key={key} className="space-y-2">
+                      <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                        {key.charAt(0).toUpperCase() + key.slice(1)}
+                      </Label>
+                      <div className="flex flex-wrap gap-2">
+                        {values.map((val) => {
+                          const isSelected = selectedVal === val;
+                          return (
+                            <Button
+                              key={val}
+                              type="button"
+                              variant={isSelected ? "default" : "outline"}
+                              size="sm"
+                              onClick={() => {
+                                setSelectedAttributes((prev) => ({
+                                  ...prev,
+                                  [key]: val,
+                                }));
+                              }}
+                              className={`rounded-lg px-3 py-1 text-xs font-semibold transition-all ${
+                                isSelected
+                                  ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow"
+                                  : "hover:bg-muted"
+                              }`}
+                            >
+                              {val}
+                            </Button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Selection Status / Matched Variant Info */}
+              {variantAttrKeys.length > 0 && (
+                <div className="mt-4 pt-4 border-t">
+                  {matchedVariant ? (
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-center bg-indigo-500/5 dark:bg-indigo-500/10 p-3 rounded-xl border border-indigo-500/10">
+                        <div className="flex flex-col">
+                          <span className="text-[10px] text-indigo-500 font-bold uppercase tracking-wider">Disponível</span>
+                          <span className="text-sm font-semibold">
+                            SKU: {matchedVariant.sku || "Sem SKU"}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-xs text-muted-foreground block font-bold">Preço</span>
+                          <span className="text-base font-extrabold text-indigo-600 dark:text-indigo-400">
+                            R$ {matchedVariant.sale_price.toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-between items-center text-sm px-1">
+                        <span className="text-muted-foreground font-semibold">Estoque desta variação:</span>
+                        <Badge
+                          variant={matchedVariant.stock_quantity <= matchedVariant.min_stock ? "destructive" : "secondary"}
+                          className="font-bold text-xs"
+                        >
+                          {matchedVariant.stock_quantity} unidades
+                        </Badge>
+                      </div>
+
+                      {matchedVariant.stock_quantity <= 0 && (
+                        <div className="text-xs text-amber-500 bg-amber-500/5 p-2 rounded-lg border border-amber-500/10 flex items-center gap-1.5">
+                          <AlertTriangle className="h-4 w-4 shrink-0" />
+                          <span>Esta variação está sem estoque.</span>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-center p-4 bg-muted/20 border border-dashed rounded-xl text-muted-foreground text-xs">
+                      {Object.keys(selectedAttributes).length === 0 ? (
+                        <span>Selecione as opções acima para ver preço e estoque.</span>
+                      ) : (
+                        <span>Esta combinação de atributos não está disponível.</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter className="mt-4 gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsVariantSelectionOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              disabled={!matchedVariant}
+              onClick={() => {
+                if (matchedVariant) {
+                  addToCart(matchedVariant);
+                  setIsVariantSelectionOpen(false);
+                }
+              }}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold shadow-md transition-colors"
+            >
+              Adicionar ao Carrinho
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
