@@ -1,0 +1,381 @@
+"use client";
+
+import { useState } from "react";
+import { useAuth } from "@/components/providers/auth-provider";
+import { createClient } from "@/lib/supabase/client";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { useTheme } from "next-themes";
+import {
+  User,
+  Settings,
+  Database,
+  Sun,
+  Moon,
+  Sparkles,
+  Loader2,
+  CheckCircle,
+} from "lucide-react";
+import { toast } from "sonner";
+
+export default function ConfiguracoesPage() {
+  const { profile, user } = useAuth();
+  const { theme, setTheme } = useTheme();
+  const [isSeeding, setIsSeeding] = useState(false);
+  const [seedSuccess, setSeedSuccess] = useState(false);
+  const supabase = createClient();
+
+  const initials =
+    profile?.full_name
+      ?.split(" ")
+      .map((n) => n[0])
+      .join("")
+      .substring(0, 2)
+      .toUpperCase() || "??";
+
+  async function handleSeedData() {
+    setIsSeeding(true);
+    setSeedSuccess(false);
+
+    try {
+      if (!profile || profile.role !== "admin") {
+        toast.error("Permissão negada", {
+          description: "Somente administradores podem semear dados de teste.",
+        });
+        setIsSeeding(false);
+        return;
+      }
+
+      toast.info("Semeando categorias de produtos...");
+      
+      const categoriesData = [
+        { name: "Bebidas", description: "Refrigerantes, sucos, cervejas e águas", color: "#3b82f6" },
+        { name: "Alimentos", description: "Mantimentos, arroz, feijão, massas", color: "#f59e0b" },
+        { name: "Higiene Pessoal", description: "Sabonetes, shampoo, creme dental", color: "#10b981" },
+        { name: "Limpeza", description: "Detergentes, desinfetantes, sabão em pó", color: "#ec4899" },
+      ];
+
+      // Insert categories and select them back to map products
+      const { data: insertedCategories, error: catError } = await supabase
+        .from("product_categories")
+        .upsert(categoriesData, { onConflict: "name" })
+        .select();
+
+      if (catError) throw catError;
+
+      const catMap: Record<string, string> = {};
+      insertedCategories?.forEach((cat: any) => {
+        catMap[cat.name] = cat.id;
+      });
+
+      toast.info("Semeando cadastro de produtos...");
+
+      const productsData = [
+        {
+          name: "Coca-Cola Lata 350ml",
+          sku: "BEB-COCA-350",
+          barcode: "7891234560012",
+          category_id: catMap["Bebidas"],
+          cost_price: 2.20,
+          sale_price: 4.50,
+          stock_quantity: 50,
+          min_stock: 10,
+          unit: "un",
+        },
+        {
+          name: "Arroz Tipo 1 5kg Tio João",
+          sku: "ALI-ARROZ-5K",
+          barcode: "7891234560029",
+          category_id: catMap["Alimentos"],
+          cost_price: 18.50,
+          sale_price: 25.90,
+          stock_quantity: 20,
+          min_stock: 5,
+          unit: "un",
+        },
+        {
+          name: "Feijão Carioca Kicaldo 1kg",
+          sku: "ALI-FEIJAO-1K",
+          barcode: "7891234560036",
+          category_id: catMap["Alimentos"],
+          cost_price: 4.80,
+          sale_price: 7.20,
+          stock_quantity: 30,
+          min_stock: 5,
+          unit: "un",
+        },
+        {
+          name: "Sabonete Dove Original 90g",
+          sku: "HIG-SAB-DOVE",
+          barcode: "7891234560043",
+          category_id: catMap["Higiene Pessoal"],
+          cost_price: 1.90,
+          sale_price: 3.50,
+          stock_quantity: 45,
+          min_stock: 8,
+          unit: "un",
+        },
+        {
+          name: "Detergente Líquido Ypê Neutro 500ml",
+          sku: "LIM-DET-YPE",
+          barcode: "7891234560050",
+          category_id: catMap["Limpeza"],
+          cost_price: 1.20,
+          sale_price: 2.40,
+          stock_quantity: 60,
+          min_stock: 12,
+          unit: "un",
+        },
+        {
+          name: "Cerveja Heineken Long Neck 330ml",
+          sku: "BEB-HEIN-330",
+          barcode: "7891234560067",
+          category_id: catMap["Bebidas"],
+          cost_price: 3.80,
+          sale_price: 6.90,
+          stock_quantity: 8, // Estoque baixo!
+          min_stock: 12,
+          unit: "un",
+        },
+      ];
+
+      const { error: prodError } = await supabase
+        .from("products")
+        .upsert(productsData, { onConflict: "sku" });
+
+      if (prodError) throw prodError;
+
+      toast.info("Semeando carteira de clientes...");
+
+      const customersData = [
+        {
+          full_name: "Douglas Duarte",
+          email: "douglas@example.com",
+          phone: "(11) 99999-8888",
+          cpf_cnpj: "123.456.789-00",
+          address_street: "Avenida Paulista",
+          address_number: "1000",
+          address_neighborhood: "Bela Vista",
+          address_city: "São Paulo",
+          address_state: "SP",
+          address_zip: "01310-100",
+          credit_limit: 1000.00,
+          created_by: profile.id,
+        },
+        {
+          full_name: "Maria Silva Santos",
+          email: "maria.silva@example.com",
+          phone: "(11) 98888-7777",
+          cpf_cnpj: "234.567.890-12",
+          address_street: "Rua das Flores",
+          address_number: "250",
+          address_neighborhood: "Jardins",
+          address_city: "São Paulo",
+          address_state: "SP",
+          address_zip: "01400-000",
+          credit_limit: 500.00,
+          created_by: profile.id,
+        },
+        {
+          full_name: "João Santos de Oliveira",
+          email: "joao.santos@example.com",
+          phone: "(21) 97777-6666",
+          cpf_cnpj: "345.678.901-23",
+          address_street: "Avenida Atlântica",
+          address_number: "500",
+          address_neighborhood: "Copacabana",
+          address_city: "Rio de Janeiro",
+          address_state: "RJ",
+          address_zip: "22020-002",
+          credit_limit: 300.00,
+          created_by: profile.id,
+        },
+        {
+          full_name: "Ana Julia de Souza",
+          email: "ana.julia@example.com",
+          phone: "(31) 96666-5555",
+          cpf_cnpj: "456.789.012-34",
+          address_street: "Rua da Bahia",
+          address_number: "1200",
+          address_neighborhood: "Centro",
+          address_city: "Belo Horizonte",
+          address_state: "MG",
+          address_zip: "30160-011",
+          credit_limit: 1200.00,
+          created_by: profile.id,
+        },
+      ];
+
+      const { error: custError } = await supabase
+        .from("customers")
+        .upsert(customersData, { onConflict: "cpf_cnpj" });
+
+      if (custError) throw custError;
+
+      setSeedSuccess(true);
+      toast.success("Dados semeados com sucesso!", {
+        description: "Categorias, produtos e clientes criados para demonstração.",
+      });
+    } catch (error: any) {
+      console.error(error);
+      toast.error("Erro ao semear dados", {
+        description: error.message || "Erro inesperado.",
+      });
+    } finally {
+      setIsSeeding(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Configurações</h1>
+        <p className="text-muted-foreground mt-1">
+          Gerencie suas preferências de usuário, perfil e dados de demonstração.
+        </p>
+      </div>
+
+      <div className="grid gap-6 md:grid-cols-2">
+        {/* Profile Card */}
+        <Card className="border shadow-md">
+          <CardHeader className="flex flex-row items-center gap-4">
+            <Avatar className="h-16 w-16 bg-gradient-to-br from-indigo-500 to-purple-600 text-white">
+              <AvatarFallback className="text-xl font-bold">{initials}</AvatarFallback>
+            </Avatar>
+            <div className="space-y-1">
+              <CardTitle className="text-xl">{profile?.full_name}</CardTitle>
+              <CardDescription>{user?.email}</CardDescription>
+              <div className="flex gap-2 mt-1">
+                <Badge variant={profile?.role === "admin" ? "default" : "secondary"} className="capitalize">
+                  {profile?.role}
+                </Badge>
+                {profile?.is_active && (
+                  <Badge variant="outline" className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20">
+                    Ativo
+                  </Badge>
+                )}
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-4 border-t">
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <span className="text-muted-foreground block">Telefone</span>
+                <span className="font-medium">{profile?.phone || "Não informado"}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground block">Cadastrado em</span>
+                <span className="font-medium">
+                  {profile?.created_at ? new Date(profile.created_at).toLocaleDateString("pt-BR") : "N/A"}
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Theme Preferences Card */}
+        <Card className="border shadow-md">
+          <CardHeader className="flex flex-row items-center gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-500 dark:bg-indigo-500/20">
+              <Settings className="h-6 w-6" />
+            </div>
+            <div>
+              <CardTitle>Preferências do App</CardTitle>
+              <CardDescription>Configure a interface visual do sistema</CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-4 border-t">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="font-medium block text-sm">Modo Escuro / Claro</span>
+                <span className="text-muted-foreground text-xs">Alterna entre cores escuras e claras</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant={theme === "light" ? "default" : "outline"}
+                  size="icon"
+                  onClick={() => setTheme("light")}
+                  className="h-9 w-9"
+                >
+                  <Sun className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant={theme === "dark" ? "default" : "outline"}
+                  size="icon"
+                  onClick={() => setTheme("dark")}
+                  className="h-9 w-9"
+                >
+                  <Moon className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Seed Data Card */}
+        {profile?.role === "admin" && (
+          <Card className="border shadow-md md:col-span-2 bg-gradient-to-r from-indigo-500/5 to-purple-500/5">
+            <CardHeader className="flex flex-row items-center gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-purple-500/10 text-purple-500 dark:bg-purple-500/20">
+                <Database className="h-6 w-6" />
+              </div>
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  Dados de Demonstração (Seed)
+                  <Sparkles className="h-4 w-4 text-purple-500 animate-pulse" />
+                </CardTitle>
+                <CardDescription>
+                  Preencha o banco de dados com categorias, produtos e clientes padrão para testar o sistema.
+                </CardDescription>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-4 border-t flex flex-col items-start gap-4">
+              <p className="text-sm text-muted-foreground max-w-2xl">
+                Esta ação criará categorias (Alimentos, Bebidas, Higiene, Limpeza), clientes teste com limites
+                de crédito pré-definidos (Douglas Duarte, Maria Silva, etc.) e diversos produtos para abastecer
+                seu estoque inicial e testar vendas. Se houver conflito de dados (SKU ou CPF repetidos), eles serão atualizados.
+              </p>
+              
+              <div className="flex items-center gap-4 w-full justify-between">
+                <Button
+                  onClick={handleSeedData}
+                  disabled={isSeeding}
+                  className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-medium shadow-md transition-all duration-200"
+                >
+                  {isSeeding ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Semeando Banco...
+                    </>
+                  ) : seedSuccess ? (
+                    <>
+                      <CheckCircle className="mr-2 h-4 w-4 text-emerald-200" />
+                      Banco Semeado!
+                    </>
+                  ) : (
+                    "Semear Dados de Teste"
+                  )}
+                </Button>
+                
+                {seedSuccess && (
+                  <span className="text-emerald-500 text-sm font-medium flex items-center gap-1.5">
+                    <CheckCircle className="h-4 w-4" />
+                    Seu banco de dados agora está pronto para testes. Acesse o PDV ou as páginas de listagem.
+                  </span>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}
