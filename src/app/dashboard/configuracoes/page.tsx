@@ -25,6 +25,13 @@ import {
   CheckCircle,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export default function ConfiguracoesPage() {
   const { profile, user } = useAuth();
@@ -32,6 +39,26 @@ export default function ConfiguracoesPage() {
   const [isSeeding, setIsSeeding] = useState(false);
   const [seedSuccess, setSeedSuccess] = useState(false);
   const supabase = createClient();
+
+  const [geminiKey, setGeminiKey] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("app_vendas_gemini_key") || "";
+    }
+    return "";
+  });
+  const [geminiModel, setGeminiModel] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("app_vendas_gemini_model") || "gemini-2.5-flash";
+    }
+    return "gemini-2.5-flash";
+  });
+  const [showKey, setShowKey] = useState(false);
+
+  function handleSaveAISettings() {
+    localStorage.setItem("app_vendas_gemini_key", geminiKey.trim());
+    localStorage.setItem("app_vendas_gemini_model", geminiModel);
+    toast.success("Configurações de IA salvas com sucesso!");
+  }
 
   const initials =
     profile?.full_name
@@ -317,6 +344,64 @@ export default function ConfiguracoesPage() {
                 </Button>
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* AI Configurations Card */}
+        <Card className="border shadow-md">
+          <CardHeader className="flex flex-row items-center gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-purple-500/10 text-purple-500 dark:bg-purple-500/20">
+              <Sparkles className="h-6 w-6" />
+            </div>
+            <div>
+              <CardTitle>Inteligência Artificial (IA)</CardTitle>
+              <CardDescription>Configure a integração com o Google Gemini</CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-4 border-t">
+            <div className="space-y-2">
+              <label htmlFor="gemini-key" className="text-sm font-semibold block">Chave de API do Gemini</label>
+              <div className="relative">
+                <input
+                  id="gemini-key"
+                  type={showKey ? "text" : "password"}
+                  value={geminiKey}
+                  onChange={(e) => setGeminiKey(e.target.value)}
+                  placeholder="Cole sua API Key do Gemini (AI Studio)"
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 pr-16"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowKey(!showKey)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs font-semibold"
+                >
+                  {showKey ? "Ocultar" : "Mostrar"}
+                </button>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Sua chave fica salva localmente no seu navegador e não é enviada para nenhum servidor externo além da API oficial do Google.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="gemini-model" className="text-sm font-semibold block">Modelo de IA</label>
+              <Select value={geminiModel} onValueChange={setGeminiModel}>
+                <SelectTrigger id="gemini-model" className="h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash (Recomendado)</SelectItem>
+                  <SelectItem value="gemini-1.5-flash">Gemini 1.5 Flash (Mais leve)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Button
+              onClick={handleSaveAISettings}
+              className="w-full bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 text-white font-medium shadow-sm"
+            >
+              Salvar Configurações de IA
+            </Button>
           </CardContent>
         </Card>
 

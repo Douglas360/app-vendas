@@ -45,6 +45,7 @@ import {
   RefreshCw,
   ImagePlus,
   X,
+  Sparkles,
 } from "lucide-react";
 import Image from "next/image";
 import { toast } from "sonner";
@@ -83,6 +84,140 @@ export default function ProdutosPage() {
     is_active: true,
   });
   const [isSavingProduct, setIsSavingProduct] = useState(false);
+  const [isGeneratingAI, setIsGeneratingAI] = useState(false);
+
+  // Helper to convert File to base64
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        const base64String = reader.result as string;
+        const base64Data = base64String.split(",")[1];
+        resolve(base64Data);
+      };
+      reader.onerror = (error) => reject(error);
+    });
+  };
+
+  // Helper to convert Image URL to base64
+  const urlToBase64 = async (url: string): Promise<{ data: string; mimeType: string }> => {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(blob);
+      reader.onload = () => {
+        const base64String = reader.result as string;
+        const base64Data = base64String.split(",")[1];
+        resolve({ data: base64Data, mimeType: blob.type });
+      };
+      reader.onerror = (error) => reject(error);
+    });
+  };
+
+  async function handleGenerateProductDetails() {
+    const apiKey = localStorage.getItem("app_vendas_gemini_key");
+    const model = localStorage.getItem("app_vendas_gemini_model") || "gemini-2.5-flash";
+
+    if (!apiKey) {
+      toast.error("Configuração de IA Ausente", {
+        description: "Configure a Chave de API do Gemini em 'Configurações' do sistema.",
+      });
+      return;
+    }
+
+    if (!imagePreview) {
+      toast.error("Imagem Necessária", {
+        description: "Envie uma imagem do produto primeiro para que a IA possa analisá-la.",
+      });
+      return;
+    }
+
+    setIsGeneratingAI(true);
+    const toastId = toast.loading("IA analisando a imagem...");
+
+    try {
+      let base64Data = "";
+      let mimeType = "";
+
+      if (imageFile) {
+        base64Data = await fileToBase64(imageFile);
+        mimeType = imageFile.type;
+      } else if (currentImageUrl) {
+        const res = await urlToBase64(currentImageUrl);
+        base64Data = res.data;
+        mimeType = res.mimeType;
+      } else {
+        throw new Error("Nenhuma imagem disponível para análise.");
+      }
+
+      const prompt = `Analise a imagem deste produto. Retorne obrigatoriamente e apenas um objeto JSON com as chaves 'name' (um nome comercial atrativo, curto e direto em português, exemplo: 'Garrafa Térmica Stanley 1L') e 'description' (uma descrição curta, comercial e profissional para este produto, destacando possíveis qualidades). Não coloque crases, blocos de código markdown ou texto extra, responda apenas o JSON puro.`;
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  { text: prompt },
+                  {
+                    inlineData: {
+                      mimeType: mimeType,
+                      data: base64Data,
+                    },
+                  },
+                ],
+              },
+            ],
+            generationConfig: {
+              responseMimeType: "application/json",
+            },
+          }),
+        }
+      );
+
+      toast.dismiss(toastId);
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || "Erro na chamada da API do Gemini.");
+      }
+
+      const responseData = await response.json();
+      const textResponse = responseData.candidates?.[0]?.content?.parts?.[0]?.text;
+
+      if (!textResponse) {
+        throw new Error("A IA não retornou um conteúdo válido.");
+      }
+
+      // Parse JSON
+      const parsed = JSON.parse(textResponse.trim());
+      if (parsed.name && parsed.description) {
+        setProductForm((prev) => ({
+          ...prev,
+          name: parsed.name,
+          description: parsed.description,
+        }));
+        toast.success("Nome e descrição gerados com sucesso!");
+      } else {
+        throw new Error("O formato do JSON retornado pela IA é inválido.");
+      }
+    } catch (error: any) {
+      console.error(error);
+      toast.dismiss(toastId);
+      toast.error("Erro na geração da IA", {
+        description: error.message || "Tente novamente ou verifique sua API Key.",
+      });
+    } finally {
+      setIsGeneratingAI(false);
+    }
+  }
 
   // Image State
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -670,7 +805,7 @@ export default function ProdutosPage() {
                       </div>
                     )}
                   </div>
-                  <div className="space-y-1.5">
+                  <div className="space-y-1.5 flex-1">
                     <input
                       id="product-image"
                       type="file"
@@ -678,17 +813,39 @@ export default function ProdutosPage() {
                       onChange={handleImageChange}
                       className="hidden"
                     />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => document.getElementById("product-image")?.click()}
-                    >
-                      <ImagePlus className="mr-2 h-4 w-4" />
-                      {imagePreview ? "Trocar imagem" : "Enviar imagem"}
-                    </Button>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => document.getElementById("product-image")?.click()}
+                      >
+                        <ImagePlus className="mr-2 h-4 w-4" />
+                        {imagePreview ? "Trocar imagem" : "Enviar imagem"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={!imagePreview || isGeneratingAI}
+                        onClick={handleGenerateProductDetails}
+                        className="bg-purple-100 hover:bg-purple-200 text-purple-700 dark:bg-purple-950 dark:hover:bg-purple-900 dark:text-purple-300 font-semibold shadow-sm transition-all"
+                      >
+                        {isGeneratingAI ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Gerando...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="mr-2 h-4 w-4 text-purple-500" />
+                            Preencher com IA
+                          </>
+                        )}
+                      </Button>
+                    </div>
                     <p className="text-xs text-muted-foreground">
-                      JPG, PNG, WEBP ou GIF. Máx. 5MB.
+                      JPG, PNG, WEBP ou GIF. Máx. 5MB. Envie uma imagem para habilitar o preenchimento por IA.
                     </p>
                   </div>
                 </div>
