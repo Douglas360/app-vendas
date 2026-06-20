@@ -48,6 +48,12 @@ interface CartItem extends Product {
   discount: number; // individual discount value in R$
 }
 
+interface InstallmentPreview {
+  installment_number: number;
+  amount: number;
+  due_date: string;
+}
+
 export default function PDVPage() {
   const { profile } = useAuth();
   const supabase = createClient();
@@ -79,6 +85,51 @@ export default function PDVPage() {
   const [isFinishing, setIsFinishing] = useState(false);
   const [saleFinishedSuccess, setSaleFinishedSuccess] = useState(false);
   const [latestSaleNumber, setLatestSaleNumber] = useState<number | null>(null);
+
+  // Fiado Installment Planner State
+  const [firstDueDate, setFirstDueDate] = useState<string>("");
+  const [installmentFrequency, setInstallmentFrequency] = useState<"mensal" | "30_dias">("mensal");
+  const [generatedInstallments, setGeneratedInstallments] = useState<InstallmentPreview[]>([]);
+
+  // Helper to get default first due date (30 days from now)
+  const getDefaultFirstDueDate = () => {
+    const date = new Date();
+    date.setDate(date.getDate() + 30);
+    return date.toISOString().split("T")[0];
+  };
+
+  // Helper to regenerate installments list
+  const regenerateInstallments = useCallback((count: number, firstDateStr: string, freq: "mensal" | "30_dias", totalVal: number) => {
+    const countNum = count || 1;
+    const baseDateStr = firstDateStr || new Date().toISOString().split("T")[0];
+    const baseDate = new Date(baseDateStr + "T12:00:00");
+    const newInsts: InstallmentPreview[] = [];
+
+    const baseAmount = totalVal / countNum;
+    const amounts = Array(countNum).fill(Math.floor(baseAmount * 100) / 100);
+    const diff = totalVal - amounts.reduce((a, b) => a + b, 0);
+    
+    if (amounts.length > 0) {
+      amounts[amounts.length - 1] = parseFloat((amounts[amounts.length - 1] + diff).toFixed(2));
+    }
+
+    for (let i = 0; i < countNum; i++) {
+      const dueDate = new Date(baseDate);
+      if (freq === "mensal") {
+        dueDate.setMonth(baseDate.getMonth() + i);
+      } else {
+        dueDate.setDate(baseDate.getDate() + 30 * i);
+      }
+
+      newInsts.push({
+        installment_number: i + 1,
+        amount: amounts[i],
+        due_date: dueDate.toISOString().split("T")[0],
+      });
+    }
+    setGeneratedInstallments(newInsts);
+  }, []);
+
 
   // Fetch initial data
   const loadData = useCallback(async () => {
@@ -232,6 +283,31 @@ export default function PDVPage() {
   const totalDiscount = (subtotal * saleDiscountPercent) / 100;
   const grandTotal = Math.max(0, subtotal - totalDiscount);
 
+  const handleUpdateInstallment = (index: number, field: keyof InstallmentPreview, value: any) => {
+    setGeneratedInstallments((prev) =>
+      prev.map((inst, idx) => {
+        if (idx === index) {
+          return {
+            ...inst,
+            [field]: field === "amount" ? parseFloat(value) || 0 : value,
+          };
+        }
+        return inst;
+      })
+    );
+  };
+
+  const installmentsTotalSum = generatedInstallments.reduce((acc, inst) => acc + inst.amount, 0);
+  const isInstallmentsSumValid = Math.abs(installmentsTotalSum - grandTotal) < 0.01;
+
+  // Regenerate installments automatically when planner parameters change
+  useEffect(() => {
+    if (isCheckoutOpen && paymentMethod === "fiado") {
+      const countNum = parseInt(installmentCount) || 1;
+      regenerateInstallments(countNum, firstDueDate, installmentFrequency, grandTotal);
+    }
+  }, [isCheckoutOpen, paymentMethod, installmentCount, firstDueDate, installmentFrequency, grandTotal, regenerateInstallments]);
+
   // Credit check validation for Fiado
   const isCreditAllowed = () => {
     if (!selectedCustomer) return false;
@@ -254,6 +330,12 @@ export default function PDVPage() {
     setCashReceived("");
     setInstallmentCount("1");
     setSaleFinishedSuccess(false);
+
+    // Initialize installments for fiado
+    const defaultDate = getDefaultFirstDueDate();
+    setFirstDueDate(defaultDate);
+    setInstallmentFrequency("mensal");
+    regenerateInstallments(1, defaultDate, "mensal", grandTotal);
   };
 
   // Create Sale transaction logic
@@ -331,23 +413,16 @@ export default function PDVPage() {
 
       // 5. If fiado, create credit installments
       if (paymentMethod === "fiado") {
-        const installments = parseInt(installmentCount) || 1;
-        const installmentsPayload = Array.from({ length: installments }).map((_, i) => {
-          const installmentNum = i + 1;
-          const dueDate = new Date();
-          dueDate.setDate(dueDate.getDate() + 30 * installmentNum); // 30, 60, 90 days
-
-          return {
-            payment_id: paymentData.id,
-            customer_id: selectedCustomerId!,
-            sale_id: saleData.id,
-            installment_number: installmentNum,
-            amount: grandTotal / installments,
-            amount_paid: 0,
-            due_date: dueDate.toISOString().split("T")[0],
-            status: "pendente",
-          };
-        });
+        const installmentsPayload = generatedInstallments.map((inst) => ({
+          payment_id: paymentData.id,
+          customer_id: selectedCustomerId!,
+          sale_id: saleData.id,
+          installment_number: inst.installment_number,
+          amount: inst.amount,
+          amount_paid: 0,
+          due_date: inst.due_date,
+          status: "pendente",
+        }));
 
         const { error: instError } = await supabase
           .from("credit_installments")
@@ -790,21 +865,93 @@ export default function PDVPage() {
                       </div>
                     ) : (
                       <>
-                        <div className="space-y-2">
-                          <Label htmlFor="installments-fiado">Parcelar no Fiado (em 30, 60, 90 dias...)</Label>
-                          <Select value={installmentCount} onValueChange={setInstallmentCount}>
-                            <SelectTrigger id="installments-fiado">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="1">1x (30 dias)</SelectItem>
-                              <SelectItem value="2">2x (30/60 dias)</SelectItem>
-                              <SelectItem value="3">3x (30/60/90 dias)</SelectItem>
-                              <SelectItem value="4">4x</SelectItem>
-                              <SelectItem value="6">6x</SelectItem>
-                            </SelectContent>
-                          </Select>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1 font-semibold">
+                            <Label htmlFor="installments-fiado">Parcelas</Label>
+                            <Select value={installmentCount} onValueChange={setInstallmentCount}>
+                              <SelectTrigger id="installments-fiado" className="h-9">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {Array.from({ length: 12 }).map((_, idx) => (
+                                  <SelectItem key={idx} value={(idx + 1).toString()}>
+                                    {idx + 1}x de R$ {(grandTotal / (idx + 1)).toFixed(2)}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1 font-semibold">
+                            <Label htmlFor="fiado-frequency">Frequência</Label>
+                            <Select
+                              value={installmentFrequency}
+                              onValueChange={(val: any) => setInstallmentFrequency(val)}
+                            >
+                              <SelectTrigger id="fiado-frequency" className="h-9">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="mensal">Mensal (Mesmo dia)</SelectItem>
+                                <SelectItem value="30_dias">A cada 30 dias</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
                         </div>
+
+                        <div className="space-y-1">
+                          <Label htmlFor="first-due-date">Data do 1º Vencimento</Label>
+                          <Input
+                            id="first-due-date"
+                            type="date"
+                            value={firstDueDate}
+                            onChange={(e) => setFirstDueDate(e.target.value)}
+                            className="h-9 text-xs"
+                          />
+                        </div>
+
+                        {/* Detalhamento das parcelas */}
+                        <div className="space-y-1.5">
+                          <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                            Detalhamento das Parcelas
+                          </Label>
+                          <ScrollArea className="h-[140px] border rounded-lg p-2 bg-background">
+                            <div className="space-y-2">
+                              {generatedInstallments.map((inst, index) => (
+                                <div key={index} className="flex gap-2 items-center justify-between text-xs border-b pb-2 last:border-b-0 last:pb-0">
+                                  <span className="font-bold text-muted-foreground w-12 shrink-0">
+                                    {inst.installment_number}ª Parc.
+                                  </span>
+                                  <div className="flex gap-1 items-center flex-1">
+                                    <span className="text-muted-foreground">R$</span>
+                                    <Input
+                                      type="number"
+                                      step="0.01"
+                                      value={inst.amount}
+                                      onChange={(e) => handleUpdateInstallment(index, "amount", e.target.value)}
+                                      className="h-7 w-20 text-xs px-1.5 font-semibold text-right"
+                                    />
+                                  </div>
+                                  <Input
+                                    type="date"
+                                    value={inst.due_date}
+                                    onChange={(e) => handleUpdateInstallment(index, "due_date", e.target.value)}
+                                    className="h-7 w-28 text-xs px-1.5 font-mono"
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          </ScrollArea>
+                        </div>
+
+                        {/* Sum Validation message */}
+                        {!isInstallmentsSumValid && (
+                          <div className="text-[11px] text-rose-500 font-semibold flex items-center gap-1.5 bg-rose-500/5 p-2 rounded border border-rose-500/10">
+                            <AlertTriangle className="h-4 w-4 shrink-0 animate-pulse" />
+                            <span>
+                              As parcelas somam R$ {installmentsTotalSum.toFixed(2)} (Falta R$ {(grandTotal - installmentsTotalSum).toFixed(2)}). Ajuste para prosseguir.
+                            </span>
+                          </div>
+                        )}
 
                         {/* Credit evaluation */}
                         {selectedCustomer && (
@@ -840,7 +987,7 @@ export default function PDVPage() {
                   onClick={handleCheckoutSubmit}
                   disabled={
                     isFinishing ||
-                    (paymentMethod === "fiado" && (!selectedCustomerId || !isCreditAllowed())) ||
+                    (paymentMethod === "fiado" && (!selectedCustomerId || !isCreditAllowed() || !isInstallmentsSumValid)) ||
                     (paymentMethod === "dinheiro" && cashReceived !== "" && changeValue < 0)
                   }
                   className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold"
