@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,9 @@ import {
   CheckCircle,
   Store,
   Printer,
+  MessageCircle,
+  QrCode,
+  Link2Off,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
@@ -35,6 +38,15 @@ import {
   printReceipt,
   type StoreInfo,
 } from "@/lib/receipt";
+import {
+  fetchEvolutionSettings,
+  saveEvolutionConfig,
+  connectWhatsapp,
+  getConnectionState,
+  disconnectWhatsapp,
+  setWhatsappConnected,
+  type EvolutionConfig,
+} from "@/lib/whatsapp";
 import {
   Select,
   SelectContent,
@@ -103,6 +115,109 @@ export default function ConfiguracoesPage() {
       cashReceived: 50,
       change: 15.1,
     });
+  }
+
+  // ---- WhatsApp (Evolution API) — config persistida no banco ----
+  const [evo, setEvo] = useState<EvolutionConfig>({
+    baseUrl: "",
+    apiKey: "",
+    instance: "",
+  });
+  const [evoQr, setEvoQr] = useState<string | null>(null);
+  const [evoConnecting, setEvoConnecting] = useState(false);
+  const [evoChecking, setEvoChecking] = useState(false);
+  const [evoConnected, setEvoConnected] = useState(false);
+
+  // Carrega a config salva no banco
+  useEffect(() => {
+    fetchEvolutionSettings(supabase)
+      .then((s) => {
+        setEvo({ baseUrl: s.baseUrl, apiKey: s.apiKey, instance: s.instance });
+        setEvoConnected(s.connected);
+      })
+      .catch(() => {});
+  }, [supabase]);
+
+  // Enquanto o QR está na tela, verifica a conexão a cada 3s
+  useEffect(() => {
+    if (!evoQr || evoConnected) return;
+    const id = setInterval(async () => {
+      try {
+        const state = await getConnectionState(evo);
+        if (state === "open") {
+          setEvoConnected(true);
+          await setWhatsappConnected(supabase, true);
+          setEvoQr(null);
+          toast.success("WhatsApp conectado com sucesso!");
+        }
+      } catch {
+        // ignora erros transitórios durante o polling
+      }
+    }, 3000);
+    return () => clearInterval(id);
+  }, [evoQr, evoConnected, evo, supabase]);
+
+  async function handleConnectWhatsapp() {
+    if (!evo.baseUrl.trim() || !evo.apiKey.trim() || !evo.instance.trim()) {
+      toast.error("Preencha URL, API Key e nome da instância.");
+      return;
+    }
+    setEvoConnecting(true);
+    setEvoQr(null);
+    try {
+      await saveEvolutionConfig(supabase, evo);
+      const qr = await connectWhatsapp(evo);
+      // Pode já estar conectado (sem QR)
+      const state = await getConnectionState(evo).catch(() => "close");
+      if (state === "open") {
+        setEvoConnected(true);
+        await setWhatsappConnected(supabase, true);
+        toast.success("WhatsApp já está conectado!");
+      } else if (qr) {
+        setEvoQr(qr);
+        toast.info("Escaneie o QR Code com o WhatsApp do celular.");
+      } else {
+        toast.error("Não foi possível obter o QR Code. Verifique os dados.");
+      }
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Falha ao conectar.";
+      toast.error("Erro ao conectar WhatsApp", { description: msg });
+    } finally {
+      setEvoConnecting(false);
+    }
+  }
+
+  async function handleCheckWhatsapp() {
+    setEvoChecking(true);
+    try {
+      const state = await getConnectionState(evo);
+      const connected = state === "open";
+      setEvoConnected(connected);
+      await setWhatsappConnected(supabase, connected);
+      if (connected) {
+        setEvoQr(null);
+        toast.success("WhatsApp conectado.");
+      } else {
+        toast.warning(`Status: ${state}. Ainda não conectado.`);
+      }
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Falha ao verificar.";
+      toast.error("Erro ao verificar status", { description: msg });
+    } finally {
+      setEvoChecking(false);
+    }
+  }
+
+  async function handleDisconnectWhatsapp() {
+    try {
+      await disconnectWhatsapp(evo);
+    } catch {
+      // mesmo que falhe no servidor, limpamos o estado
+    }
+    setEvoConnected(false);
+    await setWhatsappConnected(supabase, false);
+    setEvoQr(null);
+    toast.success("WhatsApp desconectado.");
   }
 
   const initials =
@@ -541,6 +656,120 @@ export default function ConfiguracoesPage() {
                 Imprimir Recibo de Exemplo
               </Button>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* WhatsApp (Evolution API) Card */}
+        <Card className="border shadow-md md:col-span-2">
+          <CardHeader className="flex flex-row items-center gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20">
+              <MessageCircle className="h-6 w-6" />
+            </div>
+            <div className="flex-1">
+              <CardTitle className="flex items-center gap-2">
+                WhatsApp (Evolution API)
+                <Badge
+                  variant="outline"
+                  className={
+                    evoConnected
+                      ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                      : "bg-muted text-muted-foreground"
+                  }
+                >
+                  {evoConnected ? "Conectado" : "Desconectado"}
+                </Badge>
+              </CardTitle>
+              <CardDescription>
+                Envia o comprovante da venda no WhatsApp do cliente automaticamente
+              </CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-4 border-t">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="evo-url">URL do Servidor Evolution</Label>
+                <Input
+                  id="evo-url"
+                  value={evo.baseUrl}
+                  onChange={(e) => setEvo({ ...evo, baseUrl: e.target.value })}
+                  placeholder="https://evolution.suaempresa.com"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="evo-key">API Key (global)</Label>
+                <Input
+                  id="evo-key"
+                  type="password"
+                  value={evo.apiKey}
+                  onChange={(e) => setEvo({ ...evo, apiKey: e.target.value })}
+                  placeholder="••••••••••••"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="evo-instance">Nome da Instância</Label>
+                <Input
+                  id="evo-instance"
+                  value={evo.instance}
+                  onChange={(e) => setEvo({ ...evo, instance: e.target.value })}
+                  placeholder="loja-principal"
+                />
+              </div>
+            </div>
+
+            {/* QR Code */}
+            {evoQr && !evoConnected && (
+              <div className="flex flex-col items-center gap-2 rounded-xl border bg-muted/30 p-4 text-center">
+                <p className="text-sm font-medium">
+                  Abra o WhatsApp → Aparelhos conectados → Conectar aparelho e escaneie:
+                </p>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={evoQr}
+                  alt="QR Code para conectar o WhatsApp"
+                  className="h-56 w-56 rounded-lg border bg-white p-2"
+                />
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Aguardando leitura...
+                </p>
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              {!evoConnected ? (
+                <Button
+                  onClick={handleConnectWhatsapp}
+                  disabled={evoConnecting}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
+                >
+                  {evoConnecting ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <QrCode className="mr-2 h-4 w-4" />
+                  )}
+                  {evoQr ? "Gerar novo QR" : "Conectar WhatsApp"}
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  onClick={handleDisconnectWhatsapp}
+                  className="text-rose-600 border-rose-500/30 hover:bg-rose-500/10"
+                >
+                  <Link2Off className="mr-2 h-4 w-4" />
+                  Desconectar
+                </Button>
+              )}
+              <Button variant="outline" onClick={handleCheckWhatsapp} disabled={evoChecking}>
+                {evoChecking && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Verificar status
+              </Button>
+            </div>
+
+            <p className="text-[10px] text-muted-foreground">
+              Requer um servidor Evolution API ativo (com CORS liberado). As credenciais ficam
+              salvas apenas neste navegador. O comprovante é enviado ao finalizar a venda, quando
+              o cliente selecionado tiver telefone.
+            </p>
           </CardContent>
         </Card>
 

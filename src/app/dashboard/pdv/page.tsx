@@ -54,6 +54,7 @@ import {
   getStoreInfo,
   type ReceiptData,
 } from "@/lib/receipt";
+import { sendReceiptToWhatsapp } from "@/lib/whatsapp";
 
 const PAYMENT_LABELS: Record<string, string> = {
   dinheiro: "Dinheiro",
@@ -567,6 +568,20 @@ export default function PDVPage() {
 
       // Abre a impressão do recibo automaticamente
       printReceipt(receipt);
+
+      // Envia o comprovante no WhatsApp do cliente (se conectado e com telefone)
+      const customerPhone = selectedCustomer?.phone;
+      if (customerPhone) {
+        sendReceiptToWhatsapp(supabase, receipt, customerPhone)
+          .then((sent) => {
+            if (sent) toast.success("Comprovante enviado no WhatsApp do cliente!");
+          })
+          .catch((err) =>
+            toast.error("Não foi possível enviar o comprovante no WhatsApp", {
+              description: err instanceof Error ? err.message : undefined,
+            })
+          );
+      }
     } catch (error: any) {
       console.error(error);
       toast.error("Erro ao registrar venda", {

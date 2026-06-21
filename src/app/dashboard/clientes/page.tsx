@@ -43,6 +43,16 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+// Máscara de telefone BR: (41) 99179-3307 (11 díg.) ou (41) 9179-3307 (10 díg.)
+function maskPhoneBR(value: string): string {
+  const d = value.replace(/\D/g, "").slice(0, 11);
+  if (d.length === 0) return "";
+  if (d.length <= 2) return `(${d}`;
+  if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+}
+
 export default function ClientesPage() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin";
@@ -146,7 +156,7 @@ export default function ClientesPage() {
     setCustomerForm({
       full_name: customer.full_name,
       email: customer.email || "",
-      phone: customer.phone || "",
+      phone: maskPhoneBR(customer.phone || ""),
       cpf_cnpj: customer.cpf_cnpj || "",
       address_street: customer.address_street || "",
       address_number: customer.address_number || "",
@@ -165,6 +175,16 @@ export default function ClientesPage() {
   // Save Customer (Create or Update)
   async function handleSaveCustomer(e: React.FormEvent) {
     e.preventDefault();
+
+    // Validação do telefone (se informado): precisa ter DDD + número (10 ou 11 dígitos)
+    const phoneDigits = customerForm.phone.replace(/\D/g, "");
+    if (phoneDigits && (phoneDigits.length < 10 || phoneDigits.length > 11)) {
+      toast.error("Telefone inválido", {
+        description: "Informe DDD + número. Ex: (41) 99179-3307",
+      });
+      return;
+    }
+
     setIsSaving(true);
 
     try {
@@ -511,13 +531,21 @@ export default function ClientesPage() {
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="phone">Telefone / Whats</Label>
+                <Label htmlFor="phone">Telefone / WhatsApp</Label>
                 <Input
                   id="phone"
-                  placeholder="(11) 99999-8888"
+                  type="tel"
+                  inputMode="tel"
+                  maxLength={16}
+                  placeholder="(41) 99999-8888"
                   value={customerForm.phone}
-                  onChange={(e) => setCustomerForm({ ...customerForm, phone: e.target.value })}
+                  onChange={(e) =>
+                    setCustomerForm({ ...customerForm, phone: maskPhoneBR(e.target.value) })
+                  }
                 />
+                <p className="text-[10px] text-muted-foreground">
+                  DDD + número (necessário para enviar o comprovante no WhatsApp).
+                </p>
               </div>
 
               <div className="space-y-1.5">
