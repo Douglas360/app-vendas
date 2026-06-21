@@ -41,8 +41,18 @@ import {
   XCircle,
   Clock,
   CheckCircle,
+  Printer,
 } from "lucide-react";
 import { toast } from "sonner";
+import { printReceipt, getStoreInfo, type ReceiptData } from "@/lib/receipt";
+
+const PAYMENT_LABELS: Record<string, string> = {
+  dinheiro: "Dinheiro",
+  pix: "PIX",
+  cartao_debito: "Cartão de Débito",
+  cartao_credito: "Cartão de Crédito",
+  fiado: "Fiado / Crediário",
+};
 
 export default function VendasPage() {
   const supabase = createClient();
@@ -116,6 +126,68 @@ export default function VendasPage() {
       });
     } finally {
       setIsCancelling(false);
+    }
+  };
+
+  // Reimprimir recibo de uma venda
+  const handlePrintReceipt = async (sale: Sale) => {
+    try {
+      const hasFiado = sale.payments?.some((p) => p.method === "fiado");
+      let installments: ReceiptData["installments"];
+
+      if (hasFiado) {
+        const { data: instData } = await supabase
+          .from("credit_installments")
+          .select("installment_number, amount, due_date")
+          .eq("sale_id", sale.id)
+          .order("installment_number", { ascending: true });
+
+        if (instData && instData.length > 0) {
+          installments = instData.map(
+            (i: {
+              installment_number: number;
+              amount: number;
+              due_date: string;
+            }) => ({
+              number: i.installment_number,
+              amount: i.amount,
+              dueDate: i.due_date,
+            })
+          );
+        }
+      }
+
+      const paymentLabel =
+        sale.payments && sale.payments.length > 0
+          ? sale.payments
+              .map((p) => PAYMENT_LABELS[p.method] || p.method)
+              .join(", ")
+          : "—";
+
+      const receipt: ReceiptData = {
+        store: getStoreInfo(),
+        saleNumber: sale.sale_number,
+        date: sale.created_at || new Date().toISOString(),
+        seller: sale.seller?.full_name || "—",
+        customer: sale.customer?.full_name || null,
+        items: (sale.items || []).map((item) => ({
+          name: item.product?.name || "Produto",
+          quantity: item.quantity,
+          unit: item.product?.unit || "un",
+          unitPrice: item.unit_price,
+          total: item.total,
+        })),
+        subtotal: sale.subtotal,
+        discount: sale.discount_amount,
+        total: sale.total,
+        paymentMethodLabel: paymentLabel,
+        installments,
+      };
+
+      printReceipt(receipt);
+    } catch (error: unknown) {
+      console.error(error);
+      toast.error("Erro ao gerar recibo");
     }
   };
 
@@ -345,17 +417,30 @@ export default function VendasPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => {
-                          setSelectedSale(sale);
-                          setIsDetailsOpen(true);
-                        }}
-                        className="h-8 w-8 text-indigo-500 hover:text-indigo-600 hover:bg-indigo-500/10"
-                      >
-                        <Eye className="h-4 w-4" />
-                      </Button>
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => {
+                            setSelectedSale(sale);
+                            setIsDetailsOpen(true);
+                          }}
+                          className="h-8 w-8 text-indigo-500 hover:text-indigo-600 hover:bg-indigo-500/10"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        {sale.status !== "cancelada" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handlePrintReceipt(sale)}
+                            title="Imprimir recibo"
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted"
+                          >
+                            <Printer className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -522,9 +607,21 @@ export default function VendasPage() {
             ) : (
               <div />
             )}
-            <Button type="button" variant="outline" onClick={() => setIsDetailsOpen(false)} className="w-24">
-              Fechar
-            </Button>
+            <div className="flex items-center gap-2">
+              {selectedSale && selectedSale.status !== "cancelada" && (
+                <Button
+                  variant="outline"
+                  onClick={() => handlePrintReceipt(selectedSale)}
+                  className="font-medium"
+                >
+                  <Printer className="mr-2 h-4 w-4" />
+                  Imprimir Recibo
+                </Button>
+              )}
+              <Button type="button" variant="outline" onClick={() => setIsDetailsOpen(false)} className="w-24">
+                Fechar
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

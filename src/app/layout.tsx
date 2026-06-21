@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { AuthProvider } from "@/components/providers/auth-provider";
+import { ServiceWorkerRegister } from "@/components/providers/service-worker-register";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
@@ -67,6 +68,7 @@ export default function RootLayout({
             <TooltipProvider delayDuration={0}>
               {children}
               <Toaster richColors position="top-right" />
+              <ServiceWorkerRegister />
             </TooltipProvider>
           </AuthProvider>
         </ThemeProvider>

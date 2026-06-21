@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { Fragment, useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useAuth } from "@/components/providers/auth-provider";
 import { createClient } from "@/lib/supabase/client";
 import type {
   Customer,
@@ -82,7 +81,6 @@ export default function ClienteDetalhePage() {
   const customerId = params?.id;
   const router = useRouter();
   const supabase = createClient();
-  const { profile } = useAuth();
 
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [sales, setSales] = useState<Sale[]>([]);
@@ -448,9 +446,8 @@ export default function ClienteDetalhePage() {
                     {sales.map((sale) => {
                       const isExpanded = expandedSale === sale.id;
                       return (
-                        <>
+                        <Fragment key={sale.id}>
                           <TableRow
-                            key={sale.id}
                             className="hover:bg-muted/30 cursor-pointer"
                             onClick={() =>
                               setExpandedSale(isExpanded ? null : sale.id)
@@ -507,7 +504,7 @@ export default function ClienteDetalhePage() {
                           </TableRow>
 
                           {isExpanded && (
-                            <TableRow key={`${sale.id}-detail`} className="bg-muted/20">
+                            <TableRow className="bg-muted/20">
                               <TableCell colSpan={6} className="p-0">
                                 <div className="p-4 space-y-3">
                                   <div className="border rounded-lg overflow-hidden bg-background">
@@ -568,7 +565,7 @@ export default function ClienteDetalhePage() {
                               </TableCell>
                             </TableRow>
                           )}
-                        </>
+                        </Fragment>
                       );
                     })}
                   </TableBody>

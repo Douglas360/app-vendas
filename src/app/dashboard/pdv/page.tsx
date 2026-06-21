@@ -40,8 +40,22 @@ import {
   Percent,
   CheckCircle2,
   AlertTriangle,
+  Printer,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  printReceipt,
+  getStoreInfo,
+  type ReceiptData,
+} from "@/lib/receipt";
+
+const PAYMENT_LABELS: Record<string, string> = {
+  dinheiro: "Dinheiro",
+  pix: "PIX",
+  cartao_debito: "Cartão de Débito",
+  cartao_credito: "Cartão de Crédito",
+  fiado: "Fiado / Crediário",
+};
 
 interface CartItem extends Product {
   quantity: number;
@@ -85,6 +99,7 @@ export default function PDVPage() {
   const [isFinishing, setIsFinishing] = useState(false);
   const [saleFinishedSuccess, setSaleFinishedSuccess] = useState(false);
   const [latestSaleNumber, setLatestSaleNumber] = useState<number | null>(null);
+  const [lastReceipt, setLastReceipt] = useState<ReceiptData | null>(null);
 
   // Fiado Installment Planner State
   const [firstDueDate, setFirstDueDate] = useState<string>("");
@@ -171,6 +186,16 @@ export default function PDVPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Pré-seleciona o cliente quando vem da página do cliente (?cliente=<id>)
+  useEffect(() => {
+    if (typeof window === "undefined" || customers.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const preselectId = params.get("cliente");
+    if (preselectId && customers.some((c) => c.id === preselectId)) {
+      setSelectedCustomerId(preselectId);
+    }
+  }, [customers]);
 
   // Focus barcode input on mount and keep it focused
   useEffect(() => {
@@ -482,6 +507,43 @@ export default function PDVPage() {
 
       if (statusError) throw statusError;
 
+      // Monta o snapshot do recibo ANTES de limpar o carrinho/cliente
+      const receipt: ReceiptData = {
+        store: getStoreInfo(),
+        saleNumber: updatedSale.sale_number,
+        date: updatedSale.created_at || new Date().toISOString(),
+        seller: profile.full_name || "—",
+        customer: selectedCustomer?.full_name || null,
+        items: cart.map((item) => ({
+          name: item.name,
+          quantity: item.quantity,
+          unit: item.unit || "un",
+          unitPrice: item.sale_price,
+          total: item.quantity * item.sale_price - item.discount,
+        })),
+        subtotal,
+        discount: totalDiscount,
+        total: grandTotal,
+        paymentMethodLabel: PAYMENT_LABELS[paymentMethod] || paymentMethod,
+        cashReceived:
+          paymentMethod === "dinheiro" && cashReceived !== ""
+            ? parseFloat(cashReceived)
+            : undefined,
+        change:
+          paymentMethod === "dinheiro" && cashReceived !== ""
+            ? Math.max(0, parseFloat(cashReceived) - grandTotal)
+            : undefined,
+        installments:
+          paymentMethod === "fiado"
+            ? generatedInstallments.map((inst) => ({
+                number: inst.installment_number,
+                amount: inst.amount,
+                dueDate: inst.due_date,
+              }))
+            : undefined,
+      };
+      setLastReceipt(receipt);
+
       setLatestSaleNumber(updatedSale.sale_number);
       setSaleFinishedSuccess(true);
       setCart([]);
@@ -490,6 +552,9 @@ export default function PDVPage() {
       setNotes("");
       loadData(); // Reload stock in catalog
       toast.success("Venda finalizada com sucesso!");
+
+      // Abre a impressão do recibo automaticamente
+      printReceipt(receipt);
     } catch (error: any) {
       console.error(error);
       toast.error("Erro ao registrar venda", {
@@ -832,9 +897,20 @@ export default function PDVPage() {
                   A venda nº <span className="font-bold text-foreground">#{latestSaleNumber}</span> foi gravada com sucesso.
                 </p>
               </div>
-              <Button onClick={() => setIsCheckoutOpen(false)} className="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white w-full">
-                Nova Venda
-              </Button>
+              <div className="mt-4 flex w-full flex-col gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => lastReceipt && printReceipt(lastReceipt)}
+                  disabled={!lastReceipt}
+                  className="w-full"
+                >
+                  <Printer className="mr-2 h-4 w-4" />
+                  Imprimir Recibo
+                </Button>
+                <Button onClick={() => setIsCheckoutOpen(false)} className="bg-indigo-600 hover:bg-indigo-700 text-white w-full">
+                  Nova Venda
+                </Button>
+              </div>
             </div>
           ) : (
             <>

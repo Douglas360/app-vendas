@@ -23,8 +23,18 @@ import {
   Sparkles,
   Loader2,
   CheckCircle,
+  Store,
+  Printer,
 } from "lucide-react";
 import { toast } from "sonner";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  getStoreInfo,
+  saveStoreInfo,
+  printReceipt,
+  type StoreInfo,
+} from "@/lib/receipt";
 import {
   Select,
   SelectContent,
@@ -54,10 +64,45 @@ export default function ConfiguracoesPage() {
   });
   const [showKey, setShowKey] = useState(false);
 
+  // Dados da loja (para o cabeçalho do recibo)
+  const [store, setStore] = useState<StoreInfo>(() => getStoreInfo());
+
   function handleSaveAISettings() {
     localStorage.setItem("app_vendas_gemini_key", geminiKey.trim());
     localStorage.setItem("app_vendas_gemini_model", geminiModel);
     toast.success("Configurações de IA salvas com sucesso!");
+  }
+
+  function handleSaveStore() {
+    if (!store.name.trim()) {
+      toast.error("Informe o nome da loja.");
+      return;
+    }
+    saveStoreInfo(store);
+    toast.success("Dados da loja salvos!", {
+      description: "Aparecerão no cabeçalho dos recibos.",
+    });
+  }
+
+  function handlePreviewReceipt() {
+    saveStoreInfo(store);
+    printReceipt({
+      store,
+      saleNumber: 0,
+      date: new Date().toISOString(),
+      seller: profile?.full_name || "Vendedor",
+      customer: "Cliente Exemplo",
+      items: [
+        { name: "Produto de Exemplo A", quantity: 2, unit: "un", unitPrice: 4.5, total: 9.0 },
+        { name: "Produto de Exemplo B", quantity: 1, unit: "un", unitPrice: 25.9, total: 25.9 },
+      ],
+      subtotal: 34.9,
+      discount: 0,
+      total: 34.9,
+      paymentMethodLabel: "Dinheiro",
+      cashReceived: 50,
+      change: 15.1,
+    });
   }
 
   const initials =
@@ -402,6 +447,82 @@ export default function ConfiguracoesPage() {
             >
               Salvar Configurações de IA
             </Button>
+          </CardContent>
+        </Card>
+
+        {/* Store / Receipt Card */}
+        <Card className="border shadow-md md:col-span-2">
+          <CardHeader className="flex flex-row items-center gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-500 dark:bg-indigo-500/20">
+              <Store className="h-6 w-6" />
+            </div>
+            <div>
+              <CardTitle>Dados da Loja (Recibo)</CardTitle>
+              <CardDescription>
+                Informações exibidas no cabeçalho e rodapé do cupom de venda
+              </CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-4 border-t">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="store-name">Nome da Loja *</Label>
+                <Input
+                  id="store-name"
+                  value={store.name}
+                  onChange={(e) => setStore({ ...store, name: e.target.value })}
+                  placeholder="Minha Loja"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="store-cnpj">CNPJ / CPF</Label>
+                <Input
+                  id="store-cnpj"
+                  value={store.cnpj || ""}
+                  onChange={(e) => setStore({ ...store, cnpj: e.target.value })}
+                  placeholder="00.000.000/0001-00"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="store-phone">Telefone</Label>
+                <Input
+                  id="store-phone"
+                  value={store.phone || ""}
+                  onChange={(e) => setStore({ ...store, phone: e.target.value })}
+                  placeholder="(11) 99999-8888"
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="store-address">Endereço</Label>
+                <Input
+                  id="store-address"
+                  value={store.address || ""}
+                  onChange={(e) => setStore({ ...store, address: e.target.value })}
+                  placeholder="Rua Exemplo, 123 - Centro"
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="store-footer">Mensagem do Rodapé</Label>
+                <Input
+                  id="store-footer"
+                  value={store.footer || ""}
+                  onChange={(e) => setStore({ ...store, footer: e.target.value })}
+                  placeholder="Obrigado pela preferência! Volte sempre."
+                />
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                onClick={handleSaveStore}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white font-medium"
+              >
+                Salvar Dados da Loja
+              </Button>
+              <Button variant="outline" onClick={handlePreviewReceipt}>
+                <Printer className="mr-2 h-4 w-4" />
+                Imprimir Recibo de Exemplo
+              </Button>
+            </div>
           </CardContent>
         </Card>
 

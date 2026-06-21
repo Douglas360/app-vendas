@@ -117,6 +117,11 @@ function SidebarContent({ collapsed = false }: { collapsed?: boolean }) {
   const { profile, signOut } = useAuth();
   const { theme, setTheme } = useTheme();
 
+  const isActiveRoute = (href: string) =>
+    href === "/dashboard"
+      ? pathname === href
+      : pathname === href || pathname.startsWith(href + "/");
+
   const initials = profile?.full_name
     ?.split(" ")
     .map((n) => n[0])
@@ -157,7 +162,7 @@ function SidebarContent({ collapsed = false }: { collapsed?: boolean }) {
             <NavItem
               key={item.href}
               item={item}
-              isActive={pathname === item.href}
+              isActive={isActiveRoute(item.href)}
               collapsed={collapsed}
             />
           ))}
@@ -171,7 +176,7 @@ function SidebarContent({ collapsed = false }: { collapsed?: boolean }) {
             <NavItem
               key={item.href}
               item={item}
-              isActive={pathname === item.href}
+              isActive={isActiveRoute(item.href)}
               collapsed={collapsed}
             />
           ))}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/providers/auth-provider";
 import { createClient } from "@/lib/supabase/client";
 import type { Customer } from "@/lib/types/database";
@@ -45,6 +46,7 @@ export default function ClientesPage() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin";
   const supabase = createClient();
+  const router = useRouter();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -70,10 +72,6 @@ export default function ClientesPage() {
     is_active: true,
   });
   const [isSaving, setIsSaving] = useState(false);
-
-  // View Customer Details Sheet
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
   // Fetch Data
   const fetchCustomers = useCallback(async () => {
@@ -230,10 +228,9 @@ export default function ClientesPage() {
     }
   }
 
-  // Open Details Sheet
+  // Navigate to customer detail page
   function handleViewCustomer(customer: Customer) {
-    setSelectedCustomer(customer);
-    setIsDetailsOpen(true);
+    router.push(`/dashboard/clientes/${customer.id}`);
   }
 
   return (
@@ -600,95 +597,6 @@ export default function ClientesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Details Sheets / Dialog */}
-      <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Detalhes do Cliente</DialogTitle>
-            <DialogDescription>
-              Ficha cadastral completa e situação de crédito.
-            </DialogDescription>
-          </DialogHeader>
-
-          {selectedCustomer && (
-            <div className="space-y-4 pt-2">
-              <div className="rounded-xl bg-muted/40 p-4 border space-y-2">
-                <h4 className="font-bold text-base">{selectedCustomer.full_name}</h4>
-                {selectedCustomer.cpf_cnpj && (
-                  <p className="text-xs font-mono text-muted-foreground">CPF/CNPJ: {selectedCustomer.cpf_cnpj}</p>
-                )}
-                <div className="flex gap-2 pt-1">
-                  <Badge variant={selectedCustomer.is_active ? "default" : "secondary"}>
-                    {selectedCustomer.is_active ? "Ativo" : "Inativo"}
-                  </Badge>
-                </div>
-              </div>
-
-              {/* Debt and Credit Status */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 border rounded-xl bg-rose-500/5 text-rose-700 border-rose-500/10">
-                  <span className="text-[10px] uppercase font-bold text-rose-500">Dívida Atual</span>
-                  <p className="text-lg font-bold">R$ {selectedCustomer.current_debt.toFixed(2)}</p>
-                </div>
-                <div className="p-3 border rounded-xl bg-indigo-500/5 text-indigo-700 border-indigo-500/10">
-                  <span className="text-[10px] uppercase font-bold text-indigo-500">Limite de Crédito</span>
-                  <p className="text-lg font-bold">R$ {selectedCustomer.credit_limit.toFixed(2)}</p>
-                </div>
-              </div>
-
-              {/* Contact Info */}
-              <div className="space-y-2 text-sm">
-                <h4 className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Informações de Contato</h4>
-                <div className="divide-y border-y">
-                  <div className="py-2 flex justify-between">
-                    <span className="text-muted-foreground">Telefone:</span>
-                    <span className="font-medium">{selectedCustomer.phone || "-"}</span>
-                  </div>
-                  <div className="py-2 flex justify-between">
-                    <span className="text-muted-foreground">E-mail:</span>
-                    <span className="font-medium">{selectedCustomer.email || "-"}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Address Info */}
-              <div className="space-y-2 text-sm">
-                <h4 className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Endereço</h4>
-                {selectedCustomer.address_street ? (
-                  <div className="border p-3 rounded-xl bg-muted/20 text-muted-foreground">
-                    <p className="font-medium text-foreground">
-                      {selectedCustomer.address_street}, {selectedCustomer.address_number}
-                      {selectedCustomer.address_complement && ` - ${selectedCustomer.address_complement}`}
-                    </p>
-                    <p>
-                      {selectedCustomer.address_neighborhood} - {selectedCustomer.address_city}/{selectedCustomer.address_state}
-                    </p>
-                    <p className="text-xs mt-1">CEP: {selectedCustomer.address_zip}</p>
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground italic">Sem endereço cadastrado.</p>
-                )}
-              </div>
-
-              {/* Notes */}
-              {selectedCustomer.notes && (
-                <div className="space-y-2 text-sm border-t pt-2">
-                  <h4 className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">Observações</h4>
-                  <p className="text-muted-foreground text-xs leading-relaxed bg-muted/20 p-2.5 rounded-xl border">
-                    {selectedCustomer.notes}
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
-          <DialogFooter className="pt-2">
-            <Button variant="outline" onClick={() => setIsDetailsOpen(false)} className="w-full">
-              Fechar Ficha
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
