@@ -852,7 +852,8 @@ export default function ProdutosPage() {
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          <div className="hidden overflow-x-auto md:block">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -922,7 +923,16 @@ export default function ProdutosPage() {
                           </div>
                           <div>
                             <div className="flex items-center gap-2">
-                              <p className="font-semibold">{prod.name}</p>
+                              {isAdmin ? (
+                                <button
+                                  onClick={() => handleEditProduct(prod)}
+                                  className="font-semibold text-left transition-colors hover:text-indigo-600 hover:underline"
+                                >
+                                  {prod.name}
+                                </button>
+                              ) : (
+                                <p className="font-semibold">{prod.name}</p>
+                              )}
                               {hasVariants && (
                                 <Badge variant="secondary" className="text-[10px] bg-purple-500/10 text-purple-600 border-purple-500/20 font-bold px-1.5 py-0.5">
                                   {children.length} var.
@@ -1023,6 +1033,85 @@ export default function ProdutosPage() {
               </TableBody>
             </Table>
           </div>
+
+          {/* ----- Lista simplificada (celular) ----- */}
+          <div className="divide-y md:hidden">
+            {filteredProducts.map((prod) => {
+              const children = products.filter((p) => p.parent_id === prod.id);
+              const hasVariants = children.length > 0;
+              const totalStock = hasVariants
+                ? children.reduce((sum, v) => sum + v.stock_quantity, 0)
+                : prod.stock_quantity;
+              const totalMinStock = hasVariants
+                ? children.reduce((sum, v) => sum + v.min_stock, 0)
+                : prod.min_stock;
+              const isLowStock = totalStock <= totalMinStock;
+              const salePrices = children.map((c) => c.sale_price);
+              const minSale = hasVariants ? Math.min(...salePrices) : prod.sale_price;
+              const hasRange =
+                hasVariants && Math.min(...salePrices) !== Math.max(...salePrices);
+
+              return (
+                <div key={prod.id} className="flex items-center gap-3 p-3">
+                  <button
+                    onClick={() => isAdmin && handleEditProduct(prod)}
+                    disabled={!isAdmin}
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left disabled:cursor-default"
+                  >
+                    <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-md border bg-muted/30">
+                      {prod.image_url ? (
+                        <Image
+                          src={prod.image_url}
+                          alt={prod.name}
+                          fill
+                          sizes="44px"
+                          className="object-cover"
+                          unoptimized
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-muted-foreground/40">
+                          <Package className="h-5 w-5" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <p className="truncate font-semibold">{prod.name}</p>
+                        {!prod.is_active && (
+                          <Badge variant="secondary" className="shrink-0 text-[9px]">
+                            Inativo
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-sm">
+                        <span className="font-bold text-indigo-600 dark:text-indigo-400">
+                          {hasRange ? "a partir de " : ""}R$ {minSale.toFixed(2)}
+                        </span>
+                        <span
+                          className={`ml-2 text-xs ${
+                            isLowStock ? "text-amber-500" : "text-muted-foreground"
+                          }`}
+                        >
+                          {totalStock} {prod.unit} em estoque
+                        </span>
+                      </p>
+                    </div>
+                  </button>
+                  {isAdmin && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleDeleteProduct(prod.id)}
+                      className="h-8 w-8 shrink-0 text-rose-500 hover:bg-rose-500/10 hover:text-rose-600"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          </>
         )}
       </Card>
 

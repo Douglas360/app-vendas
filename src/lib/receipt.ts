@@ -10,6 +10,7 @@ export interface StoreInfo {
   phone?: string;
   address?: string;
   footer?: string;
+  paperWidth?: string; // largura do cupom em mm: "58" ou "80"
 }
 
 export interface ReceiptItem {
@@ -48,6 +49,7 @@ const STORE_KEYS = {
   phone: "app_vendas_store_phone",
   address: "app_vendas_store_address",
   footer: "app_vendas_store_footer",
+  paperWidth: "app_vendas_store_paper_width",
 };
 
 // Lê os dados da loja salvos no navegador (com padrões)
@@ -63,6 +65,7 @@ export function getStoreInfo(): StoreInfo {
     footer:
       localStorage.getItem(STORE_KEYS.footer) ||
       "Obrigado pela preferência! Volte sempre.",
+    paperWidth: localStorage.getItem(STORE_KEYS.paperWidth) || "80",
   };
 }
 
@@ -73,6 +76,7 @@ export function saveStoreInfo(info: StoreInfo) {
   localStorage.setItem(STORE_KEYS.phone, info.phone || "");
   localStorage.setItem(STORE_KEYS.address, info.address || "");
   localStorage.setItem(STORE_KEYS.footer, info.footer || "");
+  localStorage.setItem(STORE_KEYS.paperWidth, info.paperWidth || "80");
 }
 
 function brl(value: number): string {
@@ -159,22 +163,28 @@ export function buildReceiptHtml(data: ReceiptData): string {
     .map((line) => `<div class="store-meta">${line}</div>`)
     .join("");
 
+  const paperWidth = store.paperWidth === "58" ? 58 : 80;
+  const contentPad = paperWidth === 58 ? 2 : 4;
+
   return `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8" />
 <title>Recibo #${data.saleNumber}</title>
 <style>
-  @page { size: 80mm auto; margin: 0; }
+  @page { size: ${paperWidth}mm auto; margin: 0; }
+  html, body { width: ${paperWidth}mm; }
   * { box-sizing: border-box; }
   body {
     font-family: "Courier New", Courier, monospace;
-    width: 80mm;
-    margin: 0 auto;
-    padding: 6mm 4mm;
+    width: ${paperWidth}mm;
+    margin: 0;
+    padding: 4mm ${contentPad}mm;
     color: #000;
-    font-size: 12px;
+    font-size: ${paperWidth === 58 ? 11 : 12}px;
     line-height: 1.35;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
   .center { text-align: center; }
   .store-name { font-size: 16px; font-weight: bold; text-transform: uppercase; }

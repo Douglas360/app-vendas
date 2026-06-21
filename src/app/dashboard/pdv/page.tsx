@@ -860,40 +860,67 @@ export default function PDVPage() {
                     {cart.map((item) => (
                       <div
                         key={item.id}
-                        className="flex items-center justify-between gap-2 border-b pb-2 text-sm last:border-0 last:pb-0"
+                        className="space-y-2 border-b pb-2.5 text-sm last:border-0 last:pb-0"
                       >
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-medium">{item.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            R$ {item.sale_price.toFixed(2)}
-                          </p>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate font-medium">{item.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              R$ {item.sale_price.toFixed(2)} / un
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() => updateQuantity(item.id, -1)}
+                              className="h-8 w-8"
+                            >
+                              <Minus className="h-3.5 w-3.5" />
+                            </Button>
+                            <span className="w-7 text-center text-sm font-bold">
+                              {item.quantity}
+                            </span>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() => updateQuantity(item.id, 1)}
+                              className="h-8 w-8"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                            </Button>
+                            <button
+                              onClick={() => removeFromCart(item.id)}
+                              className="ml-1 p-1 text-muted-foreground hover:text-rose-500"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-1">
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => updateQuantity(item.id, -1)}
-                            className="h-8 w-8"
-                          >
-                            <Minus className="h-3.5 w-3.5" />
-                          </Button>
-                          <span className="w-7 text-center text-sm font-bold">
-                            {item.quantity}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5">
+                            <Label
+                              htmlFor={`m-disc-${item.id}`}
+                              className="text-[11px] text-muted-foreground"
+                            >
+                              Desconto R$
+                            </Label>
+                            <Input
+                              id={`m-disc-${item.id}`}
+                              type="number"
+                              inputMode="decimal"
+                              min="0"
+                              placeholder="0,00"
+                              value={item.discount || ""}
+                              onChange={(e) =>
+                                updateItemDiscount(item.id, parseFloat(e.target.value) || 0)
+                              }
+                              className="h-8 w-24 text-xs"
+                            />
+                          </div>
+                          <span className="font-bold">
+                            R$ {(item.quantity * item.sale_price - item.discount).toFixed(2)}
                           </span>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => updateQuantity(item.id, 1)}
-                            className="h-8 w-8"
-                          >
-                            <Plus className="h-3.5 w-3.5" />
-                          </Button>
-                          <button
-                            onClick={() => removeFromCart(item.id)}
-                            className="ml-1 p-1 text-muted-foreground hover:text-rose-500"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
                         </div>
                       </div>
                     ))}
@@ -1019,21 +1046,69 @@ export default function PDVPage() {
                       </div>
                     ) : (
                       <>
-                        <div className="space-y-1.5">
-                          <Label htmlFor="m-inst">Parcelas</Label>
-                          <Select value={installmentCount} onValueChange={setInstallmentCount}>
-                            <SelectTrigger id="m-inst" className="h-11">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {["1", "2", "3", "4", "6", "12"].map((n) => (
-                                <SelectItem key={n} value={n}>
-                                  {n}x de R$ {(grandTotal / parseInt(n)).toFixed(2)}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1.5">
+                            <Label htmlFor="m-inst">Parcelas</Label>
+                            <Select value={installmentCount} onValueChange={setInstallmentCount}>
+                              <SelectTrigger id="m-inst" className="h-11">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {["1", "2", "3", "4", "6", "12"].map((n) => (
+                                  <SelectItem key={n} value={n}>
+                                    {n}x de R$ {(grandTotal / parseInt(n)).toFixed(2)}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label htmlFor="m-freq">Frequência</Label>
+                            <Select
+                              value={installmentFrequency}
+                              onValueChange={(val: "mensal" | "30_dias") =>
+                                setInstallmentFrequency(val)
+                              }
+                            >
+                              <SelectTrigger id="m-freq" className="h-11">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="mensal">Mensal (mesmo dia)</SelectItem>
+                                <SelectItem value="30_dias">A cada 30 dias</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
                         </div>
+
+                        <div className="space-y-1.5">
+                          <Label htmlFor="m-due">Data do 1º vencimento</Label>
+                          <Input
+                            id="m-due"
+                            type="date"
+                            value={firstDueDate}
+                            onChange={(e) => setFirstDueDate(e.target.value)}
+                            className="h-11"
+                          />
+                        </div>
+
+                        {/* Resumo das parcelas geradas */}
+                        {generatedInstallments.length > 0 && (
+                          <div className="space-y-1 rounded-lg border bg-background p-2.5">
+                            {generatedInstallments.map((inst) => (
+                              <div
+                                key={inst.installment_number}
+                                className="flex justify-between text-xs"
+                              >
+                                <span className="text-muted-foreground">
+                                  {inst.installment_number}ª ·{" "}
+                                  {new Date(inst.due_date + "T00:00:00").toLocaleDateString("pt-BR")}
+                                </span>
+                                <span className="font-semibold">R$ {inst.amount.toFixed(2)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                         {selectedCustomer && (
                           <div
                             className={`flex items-center gap-2 rounded-lg border p-2.5 text-xs font-medium ${

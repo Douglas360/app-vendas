@@ -33,12 +33,13 @@ import {
   Edit,
   Trash2,
   Users,
-  CreditCard,
   TrendingDown,
   Loader2,
   RefreshCw,
   Eye,
+  EyeOff,
   DollarSign,
+  ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -51,6 +52,9 @@ export default function ClientesPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [showValues, setShowValues] = useState(true);
+  const money = (v: number) =>
+    showValues ? `R$ ${v.toFixed(2)}` : "R$ ••••";
 
   // Customer Dialog State
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -244,13 +248,28 @@ export default function ClientesPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowValues((v) => !v)}
+            title={showValues ? "Ocultar valores" : "Mostrar valores"}
+          >
+            {showValues ? (
+              <EyeOff className="h-4 w-4 sm:mr-2" />
+            ) : (
+              <Eye className="h-4 w-4 sm:mr-2" />
+            )}
+            <span className="hidden sm:inline">
+              {showValues ? "Ocultar valores" : "Mostrar valores"}
+            </span>
+          </Button>
           <Button variant="outline" size="sm" onClick={fetchCustomers} disabled={isLoading}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${isLoading && "animate-spin"}`} />
-            Atualizar
+            <RefreshCw className={`h-4 w-4 sm:mr-2 ${isLoading && "animate-spin"}`} />
+            <span className="hidden sm:inline">Atualizar</span>
           </Button>
           <Button size="sm" onClick={handleAddCustomer} className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm">
-            <Plus className="h-4 w-4 mr-2" />
-            Novo Cliente
+            <Plus className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Novo Cliente</span>
           </Button>
         </div>
       </div>
@@ -277,7 +296,9 @@ export default function ClientesPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-rose-500">
-              R$ {totalDebt.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+              {showValues
+                ? `R$ ${totalDebt.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`
+                : "R$ ••••"}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
               Total acumulado de parcelas pendentes
@@ -292,10 +313,9 @@ export default function ClientesPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              R${" "}
-              {(totalCustomers > 0 ? totalDebt / totalCustomers : 0).toLocaleString("pt-BR", {
-                minimumFractionDigits: 2,
-              })}
+              {showValues
+                ? `R$ ${(totalCustomers > 0 ? totalDebt / totalCustomers : 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`
+                : "R$ ••••"}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
               Dívida média distribuída por cliente
@@ -335,25 +355,30 @@ export default function ClientesPage() {
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Nome</TableHead>
-                  <TableHead>Contato</TableHead>
-                  <TableHead>CPF / CNPJ</TableHead>
-                  <TableHead className="text-right">Dívida / Limite</TableHead>
-                  <TableHead className="text-center">Status</TableHead>
-                  <TableHead className="text-right">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredCustomers.map((cust) => {
-                  const limitExceeded = cust.current_debt >= cust.credit_limit && cust.credit_limit > 0;
-                  return (
+          <>
+            {/* ----- Tabela completa (desktop/tablet) ----- */}
+            <div className="hidden overflow-x-auto md:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Nome</TableHead>
+                    <TableHead>Contato</TableHead>
+                    <TableHead>CPF / CNPJ</TableHead>
+                    <TableHead className="text-right">Dívida / Limite</TableHead>
+                    <TableHead className="text-center">Status</TableHead>
+                    <TableHead className="text-right">Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredCustomers.map((cust) => (
                     <TableRow key={cust.id} className="hover:bg-muted/30">
                       <TableCell className="font-semibold">
-                        {cust.full_name}
+                        <button
+                          onClick={() => handleViewCustomer(cust)}
+                          className="text-left transition-colors hover:text-indigo-600 hover:underline"
+                        >
+                          {cust.full_name}
+                        </button>
                       </TableCell>
                       <TableCell className="text-sm">
                         <div className="space-y-0.5">
@@ -366,10 +391,10 @@ export default function ClientesPage() {
                       <TableCell className="text-right">
                         <div className="space-y-0.5">
                           <p className={`font-semibold ${cust.current_debt > 0 ? "text-rose-500" : ""}`}>
-                            R$ {cust.current_debt.toFixed(2)}
+                            {money(cust.current_debt)}
                           </p>
                           <p className="text-[11px] text-muted-foreground">
-                            Limite: R$ {cust.credit_limit.toFixed(2)}
+                            Limite: {money(cust.credit_limit)}
                           </p>
                         </div>
                       </TableCell>
@@ -416,11 +441,40 @@ export default function ClientesPage() {
                         </div>
                       </TableCell>
                     </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            {/* ----- Lista simplificada (celular) ----- */}
+            <div className="divide-y md:hidden">
+              {filteredCustomers.map((cust) => (
+                <button
+                  key={cust.id}
+                  onClick={() => handleViewCustomer(cust)}
+                  className="flex w-full items-center justify-between gap-3 p-4 text-left transition-colors hover:bg-muted/30"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold">{cust.full_name}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {cust.phone || "Sem telefone"}
+                      {showValues && cust.current_debt > 0 && (
+                        <span className="text-rose-500"> · deve {money(cust.current_debt)}</span>
+                      )}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {!cust.is_active && (
+                      <Badge variant="secondary" className="text-[10px]">
+                        Inativo
+                      </Badge>
+                    )}
+                    <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                </button>
+              ))}
+            </div>
+          </>
         )}
       </Card>
 

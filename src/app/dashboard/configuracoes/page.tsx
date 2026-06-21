@@ -510,6 +510,24 @@ export default function ConfiguracoesPage() {
                   placeholder="Obrigado pela preferência! Volte sempre."
                 />
               </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="store-paper">Largura do Cupom</Label>
+                <Select
+                  value={store.paperWidth || "80"}
+                  onValueChange={(val) => setStore({ ...store, paperWidth: val })}
+                >
+                  <SelectTrigger id="store-paper" className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="80">80mm (padrão térmica)</SelectItem>
+                    <SelectItem value="58">58mm (mini impressora)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[10px] text-muted-foreground">
+                  No diálogo de impressão, selecione papel “80mm/Rolo” (ou “Salvar como PDF”) para sair no tamanho de cupom.
+                </p>
+              </div>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button
