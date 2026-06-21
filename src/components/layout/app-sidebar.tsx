@@ -76,14 +76,17 @@ function NavItem({
   item,
   isActive,
   collapsed,
+  onNavigate,
 }: {
   item: (typeof NAV_ITEMS)[0];
   isActive: boolean;
   collapsed?: boolean;
+  onNavigate?: () => void;
 }) {
   const content = (
     <Link
       href={item.href}
+      onClick={onNavigate}
       className={cn(
         "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
         "hover:bg-accent/80",
@@ -112,7 +115,13 @@ function NavItem({
   return content;
 }
 
-function SidebarContent({ collapsed = false }: { collapsed?: boolean }) {
+function SidebarContent({
+  collapsed = false,
+  onNavigate,
+}: {
+  collapsed?: boolean;
+  onNavigate?: () => void;
+}) {
   const pathname = usePathname();
   const { profile, signOut } = useAuth();
   const { theme, setTheme } = useTheme();
@@ -164,6 +173,7 @@ function SidebarContent({ collapsed = false }: { collapsed?: boolean }) {
               item={item}
               isActive={isActiveRoute(item.href)}
               collapsed={collapsed}
+              onNavigate={onNavigate}
             />
           ))}
         </nav>
@@ -178,6 +188,7 @@ function SidebarContent({ collapsed = false }: { collapsed?: boolean }) {
               item={item}
               isActive={isActiveRoute(item.href)}
               collapsed={collapsed}
+              onNavigate={onNavigate}
             />
           ))}
         </nav>
@@ -267,7 +278,7 @@ export function AppSidebar() {
             </Button>
           </SheetTrigger>
           <SheetContent side="left" className="w-64 p-0">
-            <SidebarContent />
+            <SidebarContent onNavigate={() => setMobileOpen(false)} />
           </SheetContent>
         </Sheet>
       </div>

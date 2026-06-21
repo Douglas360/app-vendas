@@ -41,6 +41,12 @@ import {
   CheckCircle2,
   AlertTriangle,
   Printer,
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  QrCode,
+  Wallet,
+  Users,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -100,6 +106,10 @@ export default function PDVPage() {
   const [saleFinishedSuccess, setSaleFinishedSuccess] = useState(false);
   const [latestSaleNumber, setLatestSaleNumber] = useState<number | null>(null);
   const [lastReceipt, setLastReceipt] = useState<ReceiptData | null>(null);
+
+  // Fluxo guiado no celular (1=Cliente, 2=Produtos, 3=Pagamento, 4=Revisar)
+  const [mobileStep, setMobileStep] = useState(1);
+  const [mobileCustomerSearch, setMobileCustomerSearch] = useState("");
 
   // Fiado Installment Planner State
   const [firstDueDate, setFirstDueDate] = useState<string>("");
@@ -367,12 +377,14 @@ export default function PDVPage() {
   const isInstallmentsSumValid = Math.abs(installmentsTotalSum - grandTotal) < 0.01;
 
   // Regenerate installments automatically when planner parameters change
+  // (vale para o checkout do desktop e para o passo de pagamento no mobile)
   useEffect(() => {
-    if (isCheckoutOpen && paymentMethod === "fiado") {
+    if ((isCheckoutOpen || mobileStep === 3) && paymentMethod === "fiado") {
       const countNum = parseInt(installmentCount) || 1;
-      regenerateInstallments(countNum, firstDueDate, installmentFrequency, grandTotal);
+      const dueDate = firstDueDate || getDefaultFirstDueDate();
+      regenerateInstallments(countNum, dueDate, installmentFrequency, grandTotal);
     }
-  }, [isCheckoutOpen, paymentMethod, installmentCount, firstDueDate, installmentFrequency, grandTotal, regenerateInstallments]);
+  }, [isCheckoutOpen, mobileStep, paymentMethod, installmentCount, firstDueDate, installmentFrequency, grandTotal, regenerateInstallments]);
 
   // Credit check validation for Fiado
   const isCreditAllowed = () => {
@@ -568,8 +580,631 @@ export default function PDVPage() {
   // Change Calculator for Cash Payment
   const changeValue = parseFloat(cashReceived) - grandTotal;
 
+  const cartCount = cart.reduce((acc, i) => acc + i.quantity, 0);
+
+  // Opções de pagamento para o fluxo mobile
+  const PAY_OPTIONS: { value: typeof paymentMethod; label: string; icon: typeof DollarSign }[] = [
+    { value: "dinheiro", label: "Dinheiro", icon: DollarSign },
+    { value: "pix", label: "PIX", icon: QrCode },
+    { value: "cartao_debito", label: "Cartão Débito", icon: CreditCard },
+    { value: "cartao_credito", label: "Cartão Crédito", icon: CreditCard },
+    { value: "fiado", label: "Fiado", icon: Wallet },
+  ];
+
+  // Validação para liberar o botão de finalizar (mobile e desktop)
+  const canFinalize =
+    !isFinishing &&
+    cart.length > 0 &&
+    !(paymentMethod === "fiado" && (!selectedCustomerId || !isCreditAllowed() || !isInstallmentsSumValid)) &&
+    !(paymentMethod === "dinheiro" && cashReceived !== "" && changeValue < 0);
+
+  const mobileCustomers = customers.filter((c) => {
+    const t = mobileCustomerSearch.toLowerCase();
+    return (
+      c.full_name.toLowerCase().includes(t) ||
+      (c.phone && c.phone.includes(t)) ||
+      (c.cpf_cnpj && c.cpf_cnpj.includes(t))
+    );
+  });
+
   return (
-    <div className="flex flex-col gap-6 lg:h-[calc(100vh-6.5rem)] lg:flex-row">
+    <>
+      {/* ===================== FLUXO MOBILE (celular) ===================== */}
+      <div className="lg:hidden">
+        {saleFinishedSuccess ? (
+          <div className="flex flex-col items-center justify-center gap-4 py-12 text-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500">
+              <CheckCircle2 className="h-10 w-10" />
+            </div>
+            <div>
+              <h3 className="text-xl font-bold">Venda Finalizada!</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Venda nº <span className="font-bold text-foreground">#{latestSaleNumber}</span> gravada com sucesso.
+              </p>
+            </div>
+            <div className="mt-2 flex w-full max-w-xs flex-col gap-2">
+              <Button
+                variant="outline"
+                onClick={() => lastReceipt && printReceipt(lastReceipt)}
+                disabled={!lastReceipt}
+                className="w-full"
+              >
+                <Printer className="mr-2 h-4 w-4" />
+                Imprimir Recibo
+              </Button>
+              <Button
+                onClick={() => {
+                  setSaleFinishedSuccess(false);
+                  setMobileStep(1);
+                  setPaymentMethod("dinheiro");
+                  setCashReceived("");
+                  setInstallmentCount("1");
+                  setMobileCustomerSearch("");
+                }}
+                className="w-full bg-indigo-600 text-white hover:bg-indigo-700"
+              >
+                Nova Venda
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-4">
+            {/* Stepper */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <h1 className="text-xl font-bold tracking-tight">Nova Venda</h1>
+                <span className="text-xs font-semibold text-muted-foreground">
+                  Passo {mobileStep} de 4
+                </span>
+              </div>
+              <div className="grid grid-cols-4 gap-1.5">
+                {["Cliente", "Produtos", "Pagamento", "Revisar"].map((label, i) => {
+                  const n = i + 1;
+                  const done = n < mobileStep;
+                  const active = n === mobileStep;
+                  return (
+                    <button
+                      key={label}
+                      onClick={() => {
+                        if (n < mobileStep) setMobileStep(n);
+                      }}
+                      className="flex flex-col items-center gap-1"
+                    >
+                      <div
+                        className={`h-1.5 w-full rounded-full ${
+                          active || done ? "bg-indigo-500" : "bg-muted"
+                        }`}
+                      />
+                      <span
+                        className={`text-[10px] font-medium ${
+                          active
+                            ? "text-indigo-600 dark:text-indigo-400"
+                            : done
+                            ? "text-foreground"
+                            : "text-muted-foreground"
+                        }`}
+                      >
+                        {label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* ---- PASSO 1: CLIENTE ---- */}
+            {mobileStep === 1 && (
+              <div className="space-y-3">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder="Buscar cliente por nome ou telefone..."
+                    value={mobileCustomerSearch}
+                    onChange={(e) => setMobileCustomerSearch(e.target.value)}
+                    className="h-11 pl-9"
+                  />
+                </div>
+
+                <button
+                  onClick={() => {
+                    setSelectedCustomerId(null);
+                    setMobileStep(2);
+                  }}
+                  className="flex w-full items-center justify-between rounded-xl border-2 border-dashed p-4 text-left transition-colors hover:border-indigo-400"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
+                      <Users className="h-5 w-5 text-muted-foreground" />
+                    </span>
+                    <div>
+                      <p className="font-semibold">Consumidor / Balcão</p>
+                      <p className="text-xs text-muted-foreground">Venda sem identificar cliente</p>
+                    </div>
+                  </div>
+                  <ArrowRight className="h-5 w-5 text-muted-foreground" />
+                </button>
+
+                <div className="space-y-2">
+                  {mobileCustomers.length === 0 ? (
+                    <p className="py-6 text-center text-sm text-muted-foreground">
+                      Nenhum cliente encontrado.
+                    </p>
+                  ) : (
+                    mobileCustomers.map((cust) => (
+                      <button
+                        key={cust.id}
+                        onClick={() => {
+                          setSelectedCustomerId(cust.id);
+                          setMobileStep(2);
+                        }}
+                        className={`flex w-full items-center justify-between rounded-xl border p-3.5 text-left transition-colors hover:border-indigo-400 ${
+                          selectedCustomerId === cust.id ? "border-indigo-500 bg-indigo-500/5" : ""
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold">{cust.full_name}</p>
+                          <p className="truncate text-xs text-muted-foreground">
+                            {cust.phone || "Sem telefone"}
+                            {cust.current_debt > 0 && (
+                              <span className="text-rose-500"> · deve R$ {cust.current_debt.toFixed(2)}</span>
+                            )}
+                          </p>
+                        </div>
+                        {selectedCustomerId === cust.id ? (
+                          <Check className="h-5 w-5 shrink-0 text-indigo-500" />
+                        ) : (
+                          <ArrowRight className="h-5 w-5 shrink-0 text-muted-foreground" />
+                        )}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ---- PASSO 2: PRODUTOS ---- */}
+            {mobileStep === 2 && (
+              <div className="space-y-3 pb-24">
+                <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2 text-xs">
+                  <span className="text-muted-foreground">Cliente:</span>
+                  <span className="font-semibold">
+                    {selectedCustomer?.full_name || "Consumidor / Balcão"}
+                  </span>
+                </div>
+
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder="Buscar produto..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="h-11 pl-9"
+                  />
+                </div>
+
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  <Button
+                    variant={activeCategory === "all" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setActiveCategory("all")}
+                    className="shrink-0 rounded-full px-4 text-xs font-semibold"
+                  >
+                    Todos
+                  </Button>
+                  {categories.map((cat) => (
+                    <Button
+                      key={cat.id}
+                      variant={activeCategory === cat.id ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setActiveCategory(cat.id)}
+                      className="shrink-0 rounded-full px-4 text-xs font-semibold"
+                    >
+                      {cat.name}
+                    </Button>
+                  ))}
+                </div>
+
+                {isLoading ? (
+                  <div className="flex h-40 items-center justify-center">
+                    <Loader2 className="h-7 w-7 animate-spin text-indigo-500" />
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    {filteredProducts.map((prod) => {
+                      const children = products.filter(
+                        (p) => p.parent_id === prod.id && p.is_active
+                      );
+                      const hasVariants = children.length > 0;
+                      const totalStock = hasVariants
+                        ? children.reduce((acc, c) => acc + c.stock_quantity, 0)
+                        : prod.stock_quantity;
+                      const minPrice = hasVariants
+                        ? Math.min(...children.map((c) => c.sale_price))
+                        : prod.sale_price;
+                      const outOfStock = totalStock <= 0;
+                      return (
+                        <button
+                          key={prod.id}
+                          disabled={outOfStock}
+                          onClick={() => handleProductClick(prod)}
+                          className={`flex flex-col rounded-xl border bg-card p-3 text-left shadow-sm transition-all ${
+                            outOfStock
+                              ? "cursor-not-allowed bg-muted/40 opacity-50"
+                              : "active:scale-[0.98] hover:border-indigo-500"
+                          }`}
+                        >
+                          <h4 className="line-clamp-2 text-sm font-semibold leading-snug">
+                            {prod.name}
+                          </h4>
+                          <div className="mt-2 flex items-end justify-between">
+                            <span className="text-sm font-extrabold text-indigo-600 dark:text-indigo-400">
+                              R$ {minPrice.toFixed(2)}
+                              {hasVariants && <span className="text-[10px]">+</span>}
+                            </span>
+                            <span className="text-[10px] font-bold text-muted-foreground">
+                              {totalStock} un
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Carrinho */}
+                {cart.length > 0 && (
+                  <div className="space-y-2 rounded-xl border p-3">
+                    <p className="text-xs font-bold uppercase text-muted-foreground">
+                      Carrinho ({cartCount})
+                    </p>
+                    {cart.map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex items-center justify-between gap-2 border-b pb-2 text-sm last:border-0 last:pb-0"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium">{item.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            R$ {item.sale_price.toFixed(2)}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => updateQuantity(item.id, -1)}
+                            className="h-8 w-8"
+                          >
+                            <Minus className="h-3.5 w-3.5" />
+                          </Button>
+                          <span className="w-7 text-center text-sm font-bold">
+                            {item.quantity}
+                          </span>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => updateQuantity(item.id, 1)}
+                            className="h-8 w-8"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                          </Button>
+                          <button
+                            onClick={() => removeFromCart(item.id)}
+                            className="ml-1 p-1 text-muted-foreground hover:text-rose-500"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Barra de ação inferior */}
+                <div className="fixed inset-x-0 bottom-0 z-20 border-t bg-background/95 p-3 backdrop-blur">
+                  <div className="mx-auto flex max-w-lg items-center gap-3">
+                    <Button
+                      variant="outline"
+                      onClick={() => setMobileStep(1)}
+                      className="h-12 px-4"
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      onClick={() => setMobileStep(3)}
+                      disabled={cart.length === 0}
+                      className="h-12 flex-1 bg-indigo-600 text-base font-bold text-white hover:bg-indigo-700"
+                    >
+                      <span>Pagamento</span>
+                      <span className="ml-2 rounded-md bg-white/20 px-2 py-0.5 text-sm">
+                        R$ {grandTotal.toFixed(2)}
+                      </span>
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ---- PASSO 3: PAGAMENTO ---- */}
+            {mobileStep === 3 && (
+              <div className="space-y-4 pb-24">
+                <div className="flex items-center justify-between rounded-xl border border-indigo-500/10 bg-indigo-500/5 p-4">
+                  <span className="text-sm font-bold text-indigo-700 dark:text-indigo-400">
+                    Total
+                  </span>
+                  <span className="text-2xl font-extrabold text-indigo-600 dark:text-indigo-400">
+                    R$ {grandTotal.toFixed(2)}
+                  </span>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-sm font-semibold">Forma de pagamento</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {PAY_OPTIONS.map((opt) => {
+                      const Icon = opt.icon;
+                      const selected = paymentMethod === opt.value;
+                      return (
+                        <button
+                          key={opt.value}
+                          onClick={() => {
+                            setPaymentMethod(opt.value);
+                            if (opt.value === "fiado" && !firstDueDate) {
+                              setFirstDueDate(getDefaultFirstDueDate());
+                            }
+                          }}
+                          className={`flex items-center gap-2 rounded-xl border-2 p-3.5 text-left transition-colors ${
+                            selected
+                              ? "border-indigo-500 bg-indigo-500/5"
+                              : "border-border hover:border-indigo-300"
+                          }`}
+                        >
+                          <Icon
+                            className={`h-5 w-5 shrink-0 ${
+                              selected ? "text-indigo-500" : "text-muted-foreground"
+                            }`}
+                          />
+                          <span className="text-sm font-semibold">{opt.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Dinheiro: troco */}
+                {paymentMethod === "dinheiro" && (
+                  <div className="space-y-2 rounded-xl border bg-muted/30 p-3">
+                    <Label htmlFor="m-cash">Valor recebido (R$)</Label>
+                    <Input
+                      id="m-cash"
+                      type="number"
+                      inputMode="decimal"
+                      step="0.01"
+                      placeholder="Ex: 50.00"
+                      value={cashReceived}
+                      onChange={(e) => setCashReceived(e.target.value)}
+                      className="h-11"
+                    />
+                    {cashReceived !== "" && (
+                      <div className="flex justify-between border-t pt-2 text-sm">
+                        <span className="text-muted-foreground">Troco</span>
+                        <span
+                          className={`text-lg font-extrabold ${
+                            changeValue >= 0 ? "text-emerald-500" : "text-rose-500"
+                          }`}
+                        >
+                          {changeValue >= 0
+                            ? `R$ ${changeValue.toFixed(2)}`
+                            : `Falta R$ ${Math.abs(changeValue).toFixed(2)}`}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Fiado */}
+                {paymentMethod === "fiado" && (
+                  <div className="space-y-3 rounded-xl border bg-muted/30 p-3">
+                    {!selectedCustomerId ? (
+                      <div className="flex items-center gap-2 text-sm text-rose-500">
+                        <AlertTriangle className="h-4 w-4 shrink-0" />
+                        <span>
+                          O fiado precisa de um cliente.{" "}
+                          <button
+                            onClick={() => setMobileStep(1)}
+                            className="font-bold underline"
+                          >
+                            Selecionar cliente
+                          </button>
+                        </span>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="m-inst">Parcelas</Label>
+                          <Select value={installmentCount} onValueChange={setInstallmentCount}>
+                            <SelectTrigger id="m-inst" className="h-11">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {["1", "2", "3", "4", "6", "12"].map((n) => (
+                                <SelectItem key={n} value={n}>
+                                  {n}x de R$ {(grandTotal / parseInt(n)).toFixed(2)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {selectedCustomer && (
+                          <div
+                            className={`flex items-center gap-2 rounded-lg border p-2.5 text-xs font-medium ${
+                              isCreditAllowed()
+                                ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-700"
+                                : "border-rose-500/20 bg-rose-500/10 text-rose-700"
+                            }`}
+                          >
+                            {isCreditAllowed() ? (
+                              <>
+                                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+                                <span>
+                                  Autorizado · limite livre R${" "}
+                                  {(selectedCustomer.credit_limit - selectedCustomer.current_debt).toFixed(2)}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <AlertTriangle className="h-4 w-4 shrink-0 text-rose-500" />
+                                <span>
+                                  Limite excedido em R${" "}
+                                  {(selectedCustomer.current_debt + grandTotal - selectedCustomer.credit_limit).toFixed(2)}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* Desconto rápido */}
+                <div className="flex items-center justify-between rounded-xl border p-3">
+                  <span className="flex items-center gap-1.5 text-sm">
+                    <Percent className="h-4 w-4 text-indigo-500" />
+                    Desconto (%)
+                  </span>
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    min="0"
+                    max="100"
+                    placeholder="0"
+                    value={saleDiscountPercent || ""}
+                    onChange={(e) =>
+                      setSaleDiscountPercent(Math.min(100, Math.max(0, parseInt(e.target.value) || 0)))
+                    }
+                    className="h-10 w-20 text-right"
+                  />
+                </div>
+
+                <div className="fixed inset-x-0 bottom-0 z-20 border-t bg-background/95 p-3 backdrop-blur">
+                  <div className="mx-auto flex max-w-lg items-center gap-3">
+                    <Button
+                      variant="outline"
+                      onClick={() => setMobileStep(2)}
+                      className="h-12 px-4"
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      onClick={() => setMobileStep(4)}
+                      disabled={
+                        paymentMethod === "fiado" &&
+                        (!selectedCustomerId || !isCreditAllowed())
+                      }
+                      className="h-12 flex-1 bg-indigo-600 text-base font-bold text-white hover:bg-indigo-700"
+                    >
+                      Revisar
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ---- PASSO 4: REVISAR ---- */}
+            {mobileStep === 4 && (
+              <div className="space-y-4 pb-24">
+                <div className="space-y-3 rounded-xl border p-4">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Cliente</span>
+                    <span className="font-semibold">
+                      {selectedCustomer?.full_name || "Consumidor / Balcão"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Pagamento</span>
+                    <span className="font-semibold">
+                      {PAY_OPTIONS.find((o) => o.value === paymentMethod)?.label}
+                      {paymentMethod === "fiado" && ` · ${installmentCount}x`}
+                    </span>
+                  </div>
+                  {paymentMethod === "dinheiro" && cashReceived !== "" && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Troco</span>
+                      <span className="font-semibold">R$ {Math.max(0, changeValue).toFixed(2)}</span>
+                    </div>
+                  )}
+
+                  <div className="border-t pt-3">
+                    <p className="mb-2 text-xs font-bold uppercase text-muted-foreground">
+                      Itens ({cartCount})
+                    </p>
+                    <div className="space-y-1.5">
+                      {cart.map((item) => (
+                        <div key={item.id} className="flex justify-between text-sm">
+                          <span className="min-w-0 truncate pr-2">
+                            {item.quantity}x {item.name}
+                          </span>
+                          <span className="shrink-0 font-medium">
+                            R$ {(item.quantity * item.sale_price - item.discount).toFixed(2)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {totalDiscount > 0 && (
+                    <div className="flex justify-between text-sm text-emerald-600">
+                      <span>Desconto</span>
+                      <span>- R$ {totalDiscount.toFixed(2)}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between border-t pt-3">
+                    <span className="text-base font-bold">Total</span>
+                    <span className="text-2xl font-extrabold text-indigo-600 dark:text-indigo-400">
+                      R$ {grandTotal.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+
+                <Input
+                  placeholder="Observações da venda (opcional)..."
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="h-11"
+                />
+
+                <div className="fixed inset-x-0 bottom-0 z-20 border-t bg-background/95 p-3 backdrop-blur">
+                  <div className="mx-auto flex max-w-lg items-center gap-3">
+                    <Button
+                      variant="outline"
+                      onClick={() => setMobileStep(3)}
+                      className="h-12 px-4"
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      onClick={handleCheckoutSubmit}
+                      disabled={!canFinalize}
+                      className="h-12 flex-1 bg-gradient-to-r from-indigo-500 to-purple-600 text-base font-bold text-white hover:from-indigo-600 hover:to-purple-700"
+                    >
+                      {isFinishing ? (
+                        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                      ) : (
+                        <Check className="mr-2 h-5 w-5" />
+                      )}
+                      Finalizar Venda
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ===================== LAYOUT DESKTOP ===================== */}
+      <div className="hidden gap-6 lg:flex lg:h-[calc(100vh-6.5rem)] lg:flex-row">
       {/* Left Column: Products Catalog */}
       <div className="flex flex-1 flex-col gap-4 min-w-0">
         <div>
@@ -882,6 +1517,8 @@ export default function PDVPage() {
           </div>
         </div>
       </Card>
+      </div>
+      {/* ===================== DIÁLOGOS (compartilhados) ===================== */}
 
       {/* Checkout Dialog */}
       <Dialog open={isCheckoutOpen} onOpenChange={setIsCheckoutOpen}>
@@ -1282,6 +1919,6 @@ export default function PDVPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }
