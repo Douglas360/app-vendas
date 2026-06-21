@@ -46,6 +46,7 @@ import {
   ImagePlus,
   X,
   Sparkles,
+  Copy,
 } from "lucide-react";
 import Image from "next/image";
 import { toast } from "sonner";
@@ -483,6 +484,92 @@ export default function ProdutosPage() {
       is_active: product.is_active,
     });
     setIsProductDialogOpen(true);
+  }
+
+  // Duplicar produto: abre o cadastro pré-preenchido como NOVO produto
+  async function handleDuplicateProduct(product: Product) {
+    setEditingProduct(null);
+    resetImageState(product.image_url); // mostra a imagem original de imediato
+
+    // Pré-preenche variações (se houver), porém como novas (sem ids/sku/barcode)
+    const dbVariants = products.filter((p) => p.parent_id === product.id);
+    if (dbVariants.length > 0) {
+      setHasVariations(true);
+      const attrKeys = Array.from(
+        new Set(dbVariants.flatMap((v) => Object.keys(v.attributes || {})))
+      );
+      const attr1Key = attrKeys[0] || "cor";
+      const attr2Key = attrKeys[1] || "tamanho";
+      setAttribute1Name(attr1Key.charAt(0).toUpperCase() + attr1Key.slice(1));
+      setAttribute2Name(attr2Key.charAt(0).toUpperCase() + attr2Key.slice(1));
+      setAttribute1Values(
+        Array.from(new Set(dbVariants.map((v) => v.attributes?.[attr1Key] || "").filter(Boolean))).join(", ")
+      );
+      setAttribute2Values(
+        Array.from(new Set(dbVariants.map((v) => v.attributes?.[attr2Key] || "").filter(Boolean))).join(", ")
+      );
+      setVariantsFormList(
+        dbVariants.map((v) => ({
+          id: "", // vazio => criado como nova variação
+          attributes: v.attributes as Record<string, string>,
+          sku: "",
+          barcode: "",
+          cost_price: v.cost_price.toString(),
+          sale_price: v.sale_price.toString(),
+          stock_quantity: v.stock_quantity.toString(),
+          min_stock: v.min_stock.toString(),
+          is_active: v.is_active,
+        }))
+      );
+    } else {
+      setHasVariations(false);
+      setAttribute1Name("Cor");
+      setAttribute1Values("");
+      setAttribute2Name("Tamanho");
+      setAttribute2Values("");
+      setVariantsFormList([]);
+    }
+
+    setProductForm({
+      name: `${product.name} (Cópia)`,
+      description: product.description || "",
+      sku: "", // SKU e código de barras são únicos: limpar para evitar conflito
+      barcode: "",
+      category_id: product.category_id || "",
+      cost_price: product.cost_price.toString(),
+      sale_price: product.sale_price.toString(),
+      stock_quantity: product.stock_quantity.toString(),
+      min_stock: product.min_stock.toString(),
+      unit: product.unit || "un",
+      is_active: product.is_active,
+    });
+    setIsProductDialogOpen(true);
+
+    // Copia a imagem para um novo arquivo, para o duplicado ter imagem própria
+    if (product.image_url) {
+      const newUrl = await copyImageInBucket(product.image_url);
+      setCurrentImageUrl(newUrl);
+      setImagePreview(newUrl);
+    }
+  }
+
+  // Copia um arquivo de imagem dentro do bucket e retorna a nova URL pública
+  async function copyImageInBucket(publicUrl: string | null): Promise<string | null> {
+    if (!publicUrl) return null;
+    const marker = `/${PRODUCT_IMAGES_BUCKET}/`;
+    const idx = publicUrl.indexOf(marker);
+    if (idx === -1) return publicUrl;
+    const fromPath = publicUrl.slice(idx + marker.length);
+    const ext = fromPath.split(".").pop() || "jpg";
+    const toPath = `${crypto.randomUUID()}.${ext}`;
+    const { error } = await supabase.storage
+      .from(PRODUCT_IMAGES_BUCKET)
+      .copy(fromPath, toPath);
+    if (error) return publicUrl; // fallback: reaproveita a mesma imagem
+    const { data } = supabase.storage
+      .from(PRODUCT_IMAGES_BUCKET)
+      .getPublicUrl(toPath);
+    return data.publicUrl;
   }
 
   // ---- Image helpers ----
@@ -1012,6 +1099,7 @@ export default function ProdutosPage() {
                               variant="ghost"
                               size="icon"
                               onClick={() => handleEditProduct(prod)}
+                              title="Editar"
                               className="h-8 w-8 text-blue-500 hover:text-blue-600 hover:bg-blue-500/10"
                             >
                               <Edit className="h-4 w-4" />
@@ -1019,7 +1107,17 @@ export default function ProdutosPage() {
                             <Button
                               variant="ghost"
                               size="icon"
+                              onClick={() => handleDuplicateProduct(prod)}
+                              title="Duplicar"
+                              className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted"
+                            >
+                              <Copy className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
                               onClick={() => handleDeleteProduct(prod.id)}
+                              title="Excluir"
                               className="h-8 w-8 text-rose-500 hover:text-rose-600 hover:bg-rose-500/10"
                             >
                               <Trash2 className="h-4 w-4" />
@@ -1098,14 +1196,26 @@ export default function ProdutosPage() {
                     </div>
                   </button>
                   {isAdmin && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleDeleteProduct(prod.id)}
-                      className="h-8 w-8 shrink-0 text-rose-500 hover:bg-rose-500/10 hover:text-rose-600"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex shrink-0 items-center">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleDuplicateProduct(prod)}
+                        title="Duplicar"
+                        className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleDeleteProduct(prod.id)}
+                        title="Excluir"
+                        className="h-8 w-8 text-rose-500 hover:bg-rose-500/10 hover:text-rose-600"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   )}
                 </div>
               );
