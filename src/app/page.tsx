@@ -104,7 +104,7 @@ export default function HomePage() {
               },
               {
                 icon: CreditCard,
-                title: "Gestão de Fiado",
+                title: "Gestão de Crediário",
                 desc: "Controle de crediário com parcelas, vencimentos e baixa de pagamentos.",
               },
               {

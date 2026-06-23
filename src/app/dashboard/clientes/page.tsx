@@ -264,7 +264,7 @@ export default function ClientesPage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Clientes</h1>
           <p className="text-muted-foreground mt-1">
-            Cadastro de clientes, limite de crédito e contas a receber (fiado).
+            Cadastro de clientes, limite de crédito e contas a receber (crediário).
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -311,7 +311,7 @@ export default function ClientesPage() {
 
         <Card className="border shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Fiado em Aberto</CardTitle>
+            <CardTitle className="text-sm font-medium">Total Crediário em Aberto</CardTitle>
             <TrendingDown className="h-4 w-4 text-rose-500" />
           </CardHeader>
           <CardContent>
@@ -504,7 +504,7 @@ export default function ClientesPage() {
           <DialogHeader>
             <DialogTitle>{editingCustomer ? "Editar Cliente" : "Novo Cliente"}</DialogTitle>
             <DialogDescription>
-              Insira os dados do cliente e configure o limite de compras no fiado/crediário.
+              Insira os dados do cliente e configure o limite de compras no crediário.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSaveCustomer} className="space-y-4">
@@ -559,7 +559,7 @@ export default function ClientesPage() {
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="credit_limit">Limite de Crédito Fiado (R$) *</Label>
+                <Label htmlFor="credit_limit">Limite de Crédito - Crediário (R$) *</Label>
                 <Input
                   id="credit_limit"
                   type="number"

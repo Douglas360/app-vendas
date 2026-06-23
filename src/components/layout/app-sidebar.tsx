@@ -58,7 +58,7 @@ const NAV_ITEMS = [
     icon: Receipt,
   },
   {
-    title: "Fiado",
+    title: "Crediário",
     href: "/dashboard/fiado",
     icon: CreditCard,
   },

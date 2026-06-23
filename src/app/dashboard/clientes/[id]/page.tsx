@@ -66,7 +66,7 @@ const METHOD_LABEL: Record<string, string> = {
   pix: "PIX",
   cartao_debito: "Cartão Débito",
   cartao_credito: "Cartão Crédito",
-  fiado: "Fiado",
+  fiado: "Crediário",
 };
 
 function currency(value: number) {
@@ -397,7 +397,7 @@ export default function ClienteDetalhePage() {
           </TabsTrigger>
           <TabsTrigger value="fiado">
             <CreditCard className="mr-1.5 h-4 w-4" />
-            Fiado / Parcelas
+            Crediário / Parcelas
             {pendingInstallments.length > 0 && (
               <Badge className="ml-2 h-5 px-1.5 bg-rose-500 text-white">
                 {pendingInstallments.length}
@@ -618,7 +618,7 @@ export default function ClienteDetalhePage() {
                 <div className="flex h-40 flex-col items-center justify-center gap-2 p-4 text-center">
                   <CheckCircle className="h-10 w-10 text-emerald-500/50" />
                   <p className="text-muted-foreground text-sm">
-                    Nenhuma parcela de fiado registrada para este cliente.
+                    Nenhuma parcela de crediário registrada para este cliente.
                   </p>
                 </div>
               ) : (

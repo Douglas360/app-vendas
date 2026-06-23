@@ -28,6 +28,8 @@ import {
   MessageCircle,
   QrCode,
   Link2Off,
+  Bell,
+  BellOff,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
@@ -54,6 +56,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  isPushSupported,
+  isPushSubscribed,
+  subscribeToPush,
+  unsubscribeFromPush,
+  fetchVapidPublicKey,
+} from "@/lib/push";
 
 export default function ConfiguracoesPage() {
   const { profile, user } = useAuth();
@@ -218,6 +227,44 @@ export default function ConfiguracoesPage() {
     await setWhatsappConnected(supabase, false);
     setEvoQr(null);
     toast.success("WhatsApp desconectado.");
+  }
+
+  // ---- Notificações push ----
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const pushSupported = isPushSupported();
+
+  useEffect(() => {
+    isPushSubscribed().then(setPushEnabled).catch(() => {});
+  }, []);
+
+  async function handleEnablePush() {
+    if (!user?.id) return;
+    setPushBusy(true);
+    try {
+      const vapid = await fetchVapidPublicKey(supabase);
+      await subscribeToPush(supabase, user.id, vapid);
+      setPushEnabled(true);
+      toast.success("Notificações ativadas neste aparelho!");
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Falha ao ativar.";
+      toast.error("Não foi possível ativar as notificações", { description: msg });
+    } finally {
+      setPushBusy(false);
+    }
+  }
+
+  async function handleDisablePush() {
+    setPushBusy(true);
+    try {
+      await unsubscribeFromPush(supabase);
+      setPushEnabled(false);
+      toast.success("Notificações desativadas neste aparelho.");
+    } catch {
+      toast.error("Falha ao desativar as notificações.");
+    } finally {
+      setPushBusy(false);
+    }
   }
 
   const initials =
@@ -770,6 +817,79 @@ export default function ConfiguracoesPage() {
               salvas apenas neste navegador. O comprovante é enviado ao finalizar a venda, quando
               o cliente selecionado tiver telefone.
             </p>
+          </CardContent>
+        </Card>
+
+        {/* Notificações Push Card */}
+        <Card className="border shadow-md md:col-span-2">
+          <CardHeader className="flex flex-row items-center gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:bg-amber-500/20">
+              <Bell className="h-6 w-6" />
+            </div>
+            <div className="flex-1">
+              <CardTitle className="flex items-center gap-2">
+                Notificações de Cobrança
+                <Badge
+                  variant="outline"
+                  className={
+                    pushEnabled
+                      ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                      : "bg-muted text-muted-foreground"
+                  }
+                >
+                  {pushEnabled ? "Ativas neste aparelho" : "Desativadas"}
+                </Badge>
+              </CardTitle>
+              <CardDescription>
+                Receba um lembrete (às 9h) quando uma parcela do crediário vence amanhã, vence hoje ou está atrasada
+              </CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3 pt-4 border-t">
+            {!pushSupported ? (
+              <p className="text-sm text-muted-foreground">
+                Este navegador não suporta notificações. Em iPhone, instale o app na tela
+                inicial (Compartilhar → Adicionar à Tela de Início) e abra por lá.
+              </p>
+            ) : (
+              <>
+                <div className="flex flex-wrap gap-2">
+                  {!pushEnabled ? (
+                    <Button
+                      onClick={handleEnablePush}
+                      disabled={pushBusy}
+                      className="bg-amber-600 hover:bg-amber-700 text-white font-medium"
+                    >
+                      {pushBusy ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Bell className="mr-2 h-4 w-4" />
+                      )}
+                      Ativar notificações neste aparelho
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      onClick={handleDisablePush}
+                      disabled={pushBusy}
+                      className="text-rose-600 border-rose-500/30 hover:bg-rose-500/10"
+                    >
+                      {pushBusy ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <BellOff className="mr-2 h-4 w-4" />
+                      )}
+                      Desativar neste aparelho
+                    </Button>
+                  )}
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  Ative em cada aparelho onde quiser receber. As notificações funcionam com o
+                  app instalado (PWA) e só são enviadas para administradores. O sininho no topo
+                  guarda o histórico.
+                </p>
+              </>
+            )}
           </CardContent>
         </Card>
 

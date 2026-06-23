@@ -51,7 +51,7 @@ const PAYMENT_LABELS: Record<string, string> = {
   pix: "PIX",
   cartao_debito: "Cartão de Débito",
   cartao_credito: "Cartão de Crédito",
-  fiado: "Fiado / Crediário",
+  fiado: "Crediário",
 };
 
 export default function VendasPage() {

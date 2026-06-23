@@ -131,7 +131,7 @@ export function buildReceiptHtml(data: ReceiptData): string {
     data.installments && data.installments.length > 0
       ? `
         <div class="divider"></div>
-        <div class="section-title">PARCELAS (FIADO)</div>
+        <div class="section-title">PARCELAS (CREDIÁRIO)</div>
         ${data.installments
           .map(
             (inst) => `

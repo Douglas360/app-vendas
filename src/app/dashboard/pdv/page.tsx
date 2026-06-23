@@ -61,7 +61,7 @@ const PAYMENT_LABELS: Record<string, string> = {
   pix: "PIX",
   cartao_debito: "Cartão de Débito",
   cartao_credito: "Cartão de Crédito",
-  fiado: "Fiado / Crediário",
+  fiado: "Crediário",
 };
 
 interface CartItem extends Product {
@@ -402,7 +402,7 @@ export default function PDVPage() {
       return;
     }
     if (paymentMethod === "fiado" && !selectedCustomerId) {
-      toast.error("Selecione um cliente para prosseguir com Fiado.");
+      toast.error("Selecione um cliente para prosseguir com Crediário.");
       return;
     }
     setIsCheckoutOpen(true);
@@ -426,7 +426,7 @@ export default function PDVPage() {
       // 1. Validate credit limit for Fiado
       if (paymentMethod === "fiado") {
         if (!selectedCustomerId) {
-          throw new Error("Cliente obrigatório para pagamento Fiado.");
+          throw new Error("Cliente obrigatório para pagamento no Crediário.");
         }
         if (!isCreditAllowed()) {
           throw new Error(
@@ -482,7 +482,7 @@ export default function PDVPage() {
           status: paymentMethod === "fiado" ? "pendente" : "pago",
           amount: grandTotal,
           installments: parseInt(installmentCount) || 1,
-          notes: paymentMethod === "fiado" ? "Compra no fiado" : null,
+          notes: paymentMethod === "fiado" ? "Compra no crediário" : null,
           paid_at: paymentMethod === "fiado" ? null : new Date().toISOString(),
         })
         .select()
@@ -603,7 +603,7 @@ export default function PDVPage() {
     { value: "pix", label: "PIX", icon: QrCode },
     { value: "cartao_debito", label: "Cartão Débito", icon: CreditCard },
     { value: "cartao_credito", label: "Cartão Crédito", icon: CreditCard },
-    { value: "fiado", label: "Fiado", icon: Wallet },
+    { value: "fiado", label: "Crediário", icon: Wallet },
   ];
 
   // Validação para liberar o botão de finalizar (mobile e desktop)
@@ -1050,7 +1050,7 @@ export default function PDVPage() {
                       <div className="flex items-center gap-2 text-sm text-rose-500">
                         <AlertTriangle className="h-4 w-4 shrink-0" />
                         <span>
-                          O fiado precisa de um cliente.{" "}
+                          O crediário precisa de um cliente.{" "}
                           <button
                             onClick={() => setMobileStep(1)}
                             className="font-bold underline"
@@ -1672,7 +1672,7 @@ export default function PDVPage() {
                       <SelectItem value="pix">PIX</SelectItem>
                       <SelectItem value="cartao_debito">Cartão de Débito</SelectItem>
                       <SelectItem value="cartao_credito">Cartão de Crédito</SelectItem>
-                      <SelectItem value="fiado">Fiado / Crediário</SelectItem>
+                      <SelectItem value="fiado">Crediário</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

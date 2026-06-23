@@ -215,7 +215,7 @@ export function buildWhatsappReceipt(data: ReceiptData): string {
 
   if (data.installments && data.installments.length > 0) {
     lines.push("");
-    lines.push("*Parcelas (fiado):*");
+    lines.push("*Parcelas (crediário):*");
     data.installments.forEach((inst) => {
       const due = new Date(inst.dueDate + "T00:00:00").toLocaleDateString("pt-BR");
       lines.push(`   ${inst.number}ª · venc. ${due} · ${brl(inst.amount)}`);

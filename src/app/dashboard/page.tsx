@@ -252,7 +252,7 @@ export default function DashboardPage() {
           variant="default"
         />
         <StatCard
-          title="Fiado a Receber"
+          title="Crediário a Receber"
           value={`R$ ${fiadoTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`}
           description="saldo devedor ativo"
           icon={TrendingDown}
@@ -339,7 +339,7 @@ export default function DashboardPage() {
           <CardHeader className="pb-3 border-b">
             <CardTitle className="text-base font-bold flex items-center gap-2">
               <Clock className="h-5 w-5 text-rose-500" />
-              Fiado Atrasado
+              Crediário Atrasado
             </CardTitle>
             <CardDescription>Clientes com parcelas vencidas e em atraso</CardDescription>
           </CardHeader>

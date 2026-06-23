@@ -197,7 +197,7 @@ export default function FiadoPage() {
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Fiado / Crediário</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Crediário</h1>
           <p className="text-muted-foreground mt-1">
             Controle de contas a receber, extratos de dívida de clientes e baixa de parcelas.
           </p>
@@ -330,7 +330,7 @@ export default function FiadoPage() {
       <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
           <DialogHeader>
-            <DialogTitle>Extrato de Fiado: {selectedDebtor?.full_name}</DialogTitle>
+            <DialogTitle>Extrato de Crediário: {selectedDebtor?.full_name}</DialogTitle>
             <DialogDescription>
               Ficha detalhada com resumo das parcelas vencidas e em aberto.
             </DialogDescription>
@@ -461,7 +461,7 @@ export default function FiadoPage() {
           <DialogHeader>
             <DialogTitle>Registrar Recebimento</DialogTitle>
             <DialogDescription>
-              Lance um recebimento (parcial ou total) para amortizar esta parcela de fiado.
+              Lance um recebimento (parcial ou total) para amortizar esta parcela de crediário.
             </DialogDescription>
           </DialogHeader>
 
