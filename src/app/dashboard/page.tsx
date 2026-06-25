@@ -1,8 +1,16 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import type { Sale, Product, Customer, CreditInstallment } from "@/lib/types/database";
+import type { Sale, Product } from "@/lib/types/database";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Card,
   CardContent,
@@ -92,8 +100,22 @@ function StatCard({
   );
 }
 
+interface ProductSaleRow {
+  id: string;
+  quantity: number;
+  unit_price: number;
+  total: number;
+  sale?: {
+    sale_number: number;
+    created_at: string;
+    status: string;
+    customer?: { full_name: string } | null;
+  } | null;
+}
+
 export default function DashboardPage() {
   const supabase = createClient();
+  const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
 
   // Stats
@@ -109,7 +131,35 @@ export default function DashboardPage() {
 
   // Lists
   const [recentSales, setRecentSales] = useState<Sale[]>([]);
-  const [topProducts, setTopProducts] = useState<{ name: string; qty: number; total: number }[]>([]);
+  const [topProducts, setTopProducts] = useState<{ id: string; name: string; qty: number; total: number }[]>([]);
+
+  // Product history dialog
+  const [selectedTopProduct, setSelectedTopProduct] = useState<{ id: string; name: string } | null>(null);
+  const [productSales, setProductSales] = useState<ProductSaleRow[]>([]);
+  const [isProductHistoryOpen, setIsProductHistoryOpen] = useState(false);
+  const [isLoadingProductHistory, setIsLoadingProductHistory] = useState(false);
+
+  async function openProductHistory(prod: { id: string; name: string }) {
+    setSelectedTopProduct(prod);
+    setIsProductHistoryOpen(true);
+    setIsLoadingProductHistory(true);
+    try {
+      const { data } = await supabase
+        .from("sale_items")
+        .select(
+          `id, quantity, unit_price, total,
+           sale:sales(sale_number, created_at, status, customer:customers(full_name))`
+        )
+        .eq("product_id", prod.id)
+        .order("created_at", { ascending: false })
+        .limit(100);
+      setProductSales((data as ProductSaleRow[]) || []);
+    } catch {
+      setProductSales([]);
+    } finally {
+      setIsLoadingProductHistory(false);
+    }
+  }
 
   const fetchDashboardData = useCallback(async () => {
     setIsLoading(true);
@@ -161,7 +211,7 @@ export default function DashboardPage() {
         .from("credit_installments")
         .select(`
           *,
-          customer:customers(full_name)
+          customer:customers(id, full_name)
         `)
         .eq("status", "atrasado")
         .order("due_date", { ascending: true })
@@ -179,28 +229,29 @@ export default function DashboardPage() {
         .limit(5);
       setRecentSales(recSales || []);
 
-      // 7. Get Top Selling products (simulated aggregating from sale items)
+      // 7. Get Top Selling products (aggregating from sale items, por produto)
       const { data: saleItems } = await supabase
         .from("sale_items")
         .select(`
           quantity,
           total,
-          product:products(name)
+          product:products(id, name)
         `)
-        .limit(50); // Get latest 50 items
+        .limit(200);
 
-      const prodAgg: Record<string, { qty: number; total: number }> = {};
+      const prodAgg: Record<string, { name: string; qty: number; total: number }> = {};
       saleItems?.forEach((item: any) => {
-        const name = (item as any).product?.name || "Produto Desconhecido";
-        if (!prodAgg[name]) {
-          prodAgg[name] = { qty: 0, total: 0 };
+        const p = (item as any).product;
+        if (!p?.id) return;
+        if (!prodAgg[p.id]) {
+          prodAgg[p.id] = { name: p.name, qty: 0, total: 0 };
         }
-        prodAgg[name].qty += item.quantity;
-        prodAgg[name].total += item.total;
+        prodAgg[p.id].qty += item.quantity;
+        prodAgg[p.id].total += item.total;
       });
 
       const sortedTop = Object.entries(prodAgg)
-        .map(([name, val]) => ({ name, qty: val.qty, total: val.total }))
+        .map(([id, val]) => ({ id, name: val.name, qty: val.qty, total: val.total }))
         .sort((a, b) => b.qty - a.qty)
         .slice(0, 5);
 
@@ -307,7 +358,11 @@ export default function DashboardPage() {
                 </TableHeader>
                 <TableBody>
                   {lowStockProducts.slice(0, 5).map((prod) => (
-                    <TableRow key={prod.id}>
+                    <TableRow
+                      key={prod.id}
+                      onClick={() => router.push("/dashboard/produtos")}
+                      className="cursor-pointer hover:bg-muted/40"
+                    >
                       <TableCell className="font-semibold text-xs">{prod.name}</TableCell>
                       <TableCell className="text-right font-bold text-rose-500">
                         {prod.stock_quantity} {prod.unit}
@@ -360,7 +415,13 @@ export default function DashboardPage() {
                     (new Date().getTime() - new Date(inst.due_date).getTime()) / (1000 * 3600 * 24)
                   );
                   return (
-                    <div key={inst.id} className="flex justify-between items-center text-xs border p-2.5 rounded-lg bg-rose-500/5 border-rose-500/10">
+                    <button
+                      key={inst.id}
+                      onClick={() =>
+                        inst.customer?.id && router.push(`/dashboard/clientes/${inst.customer.id}`)
+                      }
+                      className="flex w-full justify-between items-center text-left text-xs border p-2.5 rounded-lg bg-rose-500/5 border-rose-500/10 transition-colors hover:bg-rose-500/10"
+                    >
                       <div>
                         <p className="font-bold text-foreground">{inst.customer?.full_name}</p>
                         <p className="text-[10px] text-rose-500 font-medium">Vencido há {delayDays} dias</p>
@@ -369,7 +430,7 @@ export default function DashboardPage() {
                         <p className="font-bold text-rose-600">R$ {(inst.amount - inst.amount_paid).toFixed(2)}</p>
                         <p className="text-[9px] text-muted-foreground">Parc {inst.installment_number}ª</p>
                       </div>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
@@ -414,7 +475,11 @@ export default function DashboardPage() {
                 </TableHeader>
                 <TableBody>
                   {recentSales.map((sale) => (
-                    <TableRow key={sale.id}>
+                    <TableRow
+                      key={sale.id}
+                      onClick={() => router.push("/dashboard/vendas")}
+                      className="cursor-pointer hover:bg-muted/40"
+                    >
                       <TableCell className="font-mono font-bold text-xs">#{sale.sale_number}</TableCell>
                       <TableCell className="text-xs font-medium">
                         {sale.customer?.full_name || <span className="text-muted-foreground italic">Cliente Balcão</span>}
@@ -462,13 +527,17 @@ export default function DashboardPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                {topProducts.map((prod, index) => {
+                {topProducts.map((prod) => {
                   const maxQty = topProducts[0]?.qty || 1;
                   const percentWidth = Math.max(10, Math.min(100, (prod.qty / maxQty) * 100));
                   return (
-                    <div key={index} className="space-y-1.5 text-xs">
+                    <button
+                      key={prod.id}
+                      onClick={() => openProductHistory({ id: prod.id, name: prod.name })}
+                      className="w-full space-y-1.5 rounded-lg p-1.5 text-left text-xs transition-colors hover:bg-muted/50"
+                    >
                       <div className="flex justify-between font-semibold">
-                        <span>{prod.name}</span>
+                        <span className="hover:text-indigo-600">{prod.name}</span>
                         <span>{prod.qty} un</span>
                       </div>
                       <div className="h-3.5 w-full bg-muted rounded-full overflow-hidden flex">
@@ -478,9 +547,9 @@ export default function DashboardPage() {
                         />
                       </div>
                       <div className="text-right text-[10px] text-muted-foreground font-semibold">
-                        Total Recebido: R$ {prod.total.toFixed(2)}
+                        Total Recebido: R$ {prod.total.toFixed(2)} · toque para ver vendas
                       </div>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
@@ -494,6 +563,60 @@ export default function DashboardPage() {
           </CardFooter>
         </Card>
       </div>
+
+      {/* Histórico de vendas do produto */}
+      <Dialog open={isProductHistoryOpen} onOpenChange={setIsProductHistoryOpen}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Histórico de Vendas</DialogTitle>
+            <DialogDescription>{selectedTopProduct?.name}</DialogDescription>
+          </DialogHeader>
+
+          {isLoadingProductHistory ? (
+            <div className="flex h-40 items-center justify-center">
+              <Loader2 className="h-6 w-6 animate-spin text-indigo-500" />
+            </div>
+          ) : productSales.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              Nenhuma venda encontrada para este produto.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {productSales.map((row) => (
+                <div
+                  key={row.id}
+                  className="flex items-center justify-between gap-3 rounded-lg border p-2.5 text-sm"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold">
+                      {row.sale?.customer?.full_name || (
+                        <span className="italic text-muted-foreground">Cliente Balcão</span>
+                      )}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Venda #{row.sale?.sale_number ?? "?"}
+                      {row.sale?.created_at
+                        ? ` · ${new Date(row.sale.created_at).toLocaleDateString("pt-BR")}`
+                        : ""}
+                      {row.sale?.status && row.sale.status !== "finalizada"
+                        ? ` · ${row.sale.status}`
+                        : ""}
+                    </p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="font-bold">
+                      {row.quantity} un × R$ {row.unit_price.toFixed(2)}
+                    </p>
+                    <p className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+                      R$ {row.total.toFixed(2)}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -13,6 +13,7 @@ import type {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -57,6 +58,33 @@ import { toast } from "sonner";
 // Tipos auxiliares para os dados com joins
 type InstallmentRow = CreditInstallment & { sale?: { sale_number: number } };
 
+// Máscara de telefone BR: (41) 99179-3307
+function maskPhoneBR(value: string): string {
+  const d = value.replace(/\D/g, "").slice(0, 11);
+  if (d.length === 0) return "";
+  if (d.length <= 2) return `(${d}`;
+  if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+}
+
+const emptyCustomerForm = {
+  full_name: "",
+  email: "",
+  phone: "",
+  cpf_cnpj: "",
+  address_street: "",
+  address_number: "",
+  address_complement: "",
+  address_neighborhood: "",
+  address_city: "",
+  address_state: "",
+  address_zip: "",
+  credit_limit: "0",
+  notes: "",
+  is_active: true,
+};
+
 const STATUS_LABEL: Record<string, string> = {
   finalizada: "Finalizada",
   cancelada: "Cancelada",
@@ -100,6 +128,11 @@ export default function ClienteDetalhePage() {
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+
+  // Edit customer dialog
+  const [isEditCustomerOpen, setIsEditCustomerOpen] = useState(false);
+  const [customerForm, setCustomerForm] = useState(emptyCustomerForm);
+  const [isSavingCustomer, setIsSavingCustomer] = useState(false);
 
   // Edit installment dialog
   const [editInstallment, setEditInstallment] = useState<InstallmentRow | null>(null);
@@ -196,6 +229,77 @@ export default function ClienteDetalhePage() {
       `Olá ${customer.full_name.split(" ")[0]}, tudo bem?`
     );
     window.open(`https://wa.me/${intl}?text=${text}`, "_blank");
+  }
+
+  // Editar cliente
+  function handleOpenEditCustomer() {
+    if (!customer) return;
+    setCustomerForm({
+      full_name: customer.full_name,
+      email: customer.email || "",
+      phone: maskPhoneBR(customer.phone || ""),
+      cpf_cnpj: customer.cpf_cnpj || "",
+      address_street: customer.address_street || "",
+      address_number: customer.address_number || "",
+      address_complement: customer.address_complement || "",
+      address_neighborhood: customer.address_neighborhood || "",
+      address_city: customer.address_city || "",
+      address_state: customer.address_state || "",
+      address_zip: customer.address_zip || "",
+      credit_limit: customer.credit_limit.toString(),
+      notes: customer.notes || "",
+      is_active: customer.is_active,
+    });
+    setIsEditCustomerOpen(true);
+  }
+
+  async function handleSaveCustomer(e: React.FormEvent) {
+    e.preventDefault();
+    if (!customer) return;
+
+    const phoneDigits = customerForm.phone.replace(/\D/g, "");
+    if (phoneDigits && (phoneDigits.length < 10 || phoneDigits.length > 11)) {
+      toast.error("Telefone inválido", {
+        description: "Informe DDD + número. Ex: (41) 99179-3307",
+      });
+      return;
+    }
+
+    setIsSavingCustomer(true);
+    try {
+      const { error } = await supabase
+        .from("customers")
+        .update({
+          full_name: customerForm.full_name,
+          email: customerForm.email || null,
+          phone: customerForm.phone || null,
+          cpf_cnpj: customerForm.cpf_cnpj || null,
+          address_street: customerForm.address_street || null,
+          address_number: customerForm.address_number || null,
+          address_complement: customerForm.address_complement || null,
+          address_neighborhood: customerForm.address_neighborhood || null,
+          address_city: customerForm.address_city || null,
+          address_state: customerForm.address_state
+            ? customerForm.address_state.substring(0, 2).toUpperCase()
+            : null,
+          address_zip: customerForm.address_zip || null,
+          credit_limit: parseFloat(customerForm.credit_limit) || 0,
+          notes: customerForm.notes || null,
+          is_active: customerForm.is_active,
+        })
+        .eq("id", customer.id);
+      if (error) throw error;
+
+      toast.success("Cliente atualizado com sucesso!");
+      setIsEditCustomerOpen(false);
+      await loadData();
+    } catch (error: unknown) {
+      console.error(error);
+      const message = error instanceof Error ? error.message : "Tente novamente.";
+      toast.error("Erro ao atualizar cliente", { description: message });
+    } finally {
+      setIsSavingCustomer(false);
+    }
   }
 
   // Editar parcela (valor e vencimento)
@@ -367,6 +471,15 @@ export default function ClienteDetalhePage() {
                 WhatsApp
               </Button>
             )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleOpenEditCustomer}
+              className="text-blue-600 border-blue-500/30 hover:bg-blue-500/10"
+            >
+              <Pencil className="mr-2 h-4 w-4" />
+              Editar
+            </Button>
             <Button
               size="sm"
               onClick={handleNewSale}
@@ -852,6 +965,182 @@ export default function ClienteDetalhePage() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Edit Customer Dialog */}
+      <Dialog open={isEditCustomerOpen} onOpenChange={setIsEditCustomerOpen}>
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Editar Cliente</DialogTitle>
+            <DialogDescription>
+              Atualize os dados do cliente e o limite de crédito do crediário.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleSaveCustomer} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2 space-y-1.5">
+                <Label htmlFor="ec-name">Nome Completo *</Label>
+                <Input
+                  id="ec-name"
+                  value={customerForm.full_name}
+                  onChange={(e) => setCustomerForm({ ...customerForm, full_name: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ec-email">E-mail</Label>
+                <Input
+                  id="ec-email"
+                  type="email"
+                  value={customerForm.email}
+                  onChange={(e) => setCustomerForm({ ...customerForm, email: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ec-phone">Telefone / WhatsApp</Label>
+                <Input
+                  id="ec-phone"
+                  type="tel"
+                  inputMode="tel"
+                  maxLength={16}
+                  placeholder="(41) 99999-8888"
+                  value={customerForm.phone}
+                  onChange={(e) =>
+                    setCustomerForm({ ...customerForm, phone: maskPhoneBR(e.target.value) })
+                  }
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ec-cpf">CPF / CNPJ</Label>
+                <Input
+                  id="ec-cpf"
+                  value={customerForm.cpf_cnpj}
+                  onChange={(e) => setCustomerForm({ ...customerForm, cpf_cnpj: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ec-limit">Limite de Crédito - Crediário (R$) *</Label>
+                <Input
+                  id="ec-limit"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={customerForm.credit_limit}
+                  onChange={(e) => setCustomerForm({ ...customerForm, credit_limit: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="col-span-2 border-t pt-2 mt-1">
+                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                  Endereço
+                </h4>
+              </div>
+              <div className="col-span-2 sm:col-span-1 space-y-1.5">
+                <Label htmlFor="ec-street">Rua/Logradouro</Label>
+                <Input
+                  id="ec-street"
+                  value={customerForm.address_street}
+                  onChange={(e) => setCustomerForm({ ...customerForm, address_street: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ec-number">Número</Label>
+                <Input
+                  id="ec-number"
+                  value={customerForm.address_number}
+                  onChange={(e) => setCustomerForm({ ...customerForm, address_number: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ec-comp">Complemento</Label>
+                <Input
+                  id="ec-comp"
+                  value={customerForm.address_complement}
+                  onChange={(e) =>
+                    setCustomerForm({ ...customerForm, address_complement: e.target.value })
+                  }
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ec-neigh">Bairro</Label>
+                <Input
+                  id="ec-neigh"
+                  value={customerForm.address_neighborhood}
+                  onChange={(e) =>
+                    setCustomerForm({ ...customerForm, address_neighborhood: e.target.value })
+                  }
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ec-city">Cidade</Label>
+                <Input
+                  id="ec-city"
+                  value={customerForm.address_city}
+                  onChange={(e) => setCustomerForm({ ...customerForm, address_city: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ec-uf">Estado (UF)</Label>
+                <Input
+                  id="ec-uf"
+                  maxLength={2}
+                  placeholder="PR"
+                  value={customerForm.address_state}
+                  onChange={(e) => setCustomerForm({ ...customerForm, address_state: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ec-zip">CEP</Label>
+                <Input
+                  id="ec-zip"
+                  value={customerForm.address_zip}
+                  onChange={(e) => setCustomerForm({ ...customerForm, address_zip: e.target.value })}
+                />
+              </div>
+
+              <div className="col-span-2 space-y-1.5">
+                <Label htmlFor="ec-notes">Observações</Label>
+                <Textarea
+                  id="ec-notes"
+                  rows={2}
+                  value={customerForm.notes}
+                  onChange={(e) => setCustomerForm({ ...customerForm, notes: e.target.value })}
+                />
+              </div>
+              <div className="col-span-2 flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="ec-active"
+                  checked={customerForm.is_active}
+                  onChange={(e) => setCustomerForm({ ...customerForm, is_active: e.target.checked })}
+                  className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <Label htmlFor="ec-active" className="font-normal cursor-pointer select-none">
+                  Cliente ativo no sistema
+                </Label>
+              </div>
+            </div>
+
+            <DialogFooter className="pt-2 gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsEditCustomerOpen(false)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                disabled={isSavingCustomer}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white"
+              >
+                {isSavingCustomer && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Salvar Alterações
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit Installment Dialog */}
       <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
