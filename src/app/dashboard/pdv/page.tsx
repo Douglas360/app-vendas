@@ -47,6 +47,8 @@ import {
   QrCode,
   Wallet,
   Users,
+  Clock,
+  Save,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -73,6 +75,23 @@ interface InstallmentPreview {
   installment_number: number;
   amount: number;
   due_date: string;
+}
+
+interface OpenSaleRow {
+  id: string;
+  sale_number: number;
+  customer_id: string | null;
+  discount_percent: number;
+  total: number;
+  notes: string | null;
+  created_at: string;
+  customer?: { full_name: string } | null;
+  items?: Array<{
+    quantity: number;
+    unit_price: number;
+    discount_amount: number;
+    product: Product;
+  }>;
 }
 
 export default function PDVPage() {
@@ -111,6 +130,12 @@ export default function PDVPage() {
   // Fluxo guiado no celular (1=Cliente, 2=Produtos, 3=Pagamento, 4=Revisar)
   const [mobileStep, setMobileStep] = useState(1);
   const [mobileCustomerSearch, setMobileCustomerSearch] = useState("");
+
+  // Vendas em aberto (comandas)
+  const [openSaleId, setOpenSaleId] = useState<string | null>(null);
+  const [openSales, setOpenSales] = useState<OpenSaleRow[]>([]);
+  const [isOpenSalesDialogOpen, setIsOpenSalesDialogOpen] = useState(false);
+  const [isSavingOpen, setIsSavingOpen] = useState(false);
 
   // Fiado Installment Planner State
   const [firstDueDate, setFirstDueDate] = useState<string>("");
@@ -194,9 +219,23 @@ export default function PDVPage() {
     }
   }, [supabase]);
 
+  const loadOpenSales = useCallback(async () => {
+    const { data } = await supabase
+      .from("sales")
+      .select(
+        `id, sale_number, customer_id, discount_percent, total, notes, created_at,
+         customer:customers(full_name),
+         items:sale_items(quantity, unit_price, discount_amount, product:products(*))`
+      )
+      .eq("status", "aberta")
+      .order("created_at", { ascending: false });
+    setOpenSales((data as OpenSaleRow[]) || []);
+  }, [supabase]);
+
   useEffect(() => {
     loadData();
-  }, [loadData]);
+    loadOpenSales();
+  }, [loadData, loadOpenSales]);
 
   // Pré-seleciona o cliente quando vem da página do cliente (?cliente=<id>)
   useEffect(() => {
@@ -417,6 +456,113 @@ export default function PDVPage() {
     regenerateInstallments(1, defaultDate, "mensal", grandTotal);
   };
 
+  // Limpa o carrinho/estado após salvar ou finalizar
+  const resetCart = () => {
+    setCart([]);
+    setSelectedCustomerId(null);
+    setSaleDiscountPercent(0);
+    setNotes("");
+    setOpenSaleId(null);
+    setMobileStep(1);
+  };
+
+  // Salva a venda em aberto (comanda), sem finalizar
+  const handleSaveOpenSale = async () => {
+    if (!profile) return;
+    if (cart.length === 0) {
+      toast.error("Carrinho vazio!");
+      return;
+    }
+    setIsSavingOpen(true);
+    try {
+      const header = {
+        customer_id: selectedCustomerId || null,
+        seller_id: profile.id,
+        subtotal: subtotal,
+        discount_amount: totalDiscount,
+        discount_percent: saleDiscountPercent,
+        total: grandTotal,
+        status: "aberta" as const,
+        notes: notes.trim() || null,
+      };
+
+      let saleId: string;
+      if (openSaleId) {
+        const { error } = await supabase.from("sales").update(header).eq("id", openSaleId);
+        if (error) throw error;
+        saleId = openSaleId;
+        await supabase.from("sale_items").delete().eq("sale_id", saleId);
+      } else {
+        const { data, error } = await supabase
+          .from("sales")
+          .insert(header)
+          .select()
+          .single();
+        if (error) throw error;
+        saleId = data.id;
+      }
+
+      const itemsPayload = cart.map((item) => ({
+        sale_id: saleId,
+        product_id: item.id,
+        quantity: item.quantity,
+        unit_price: item.sale_price,
+        cost_price: item.cost_price,
+        discount_amount: item.discount,
+        total: item.quantity * item.sale_price - item.discount,
+      }));
+      const { error: itemsError } = await supabase.from("sale_items").insert(itemsPayload);
+      if (itemsError) throw itemsError;
+
+      toast.success("Venda salva em aberto!", {
+        description: "Você pode retomá-la depois para finalizar.",
+      });
+      resetCart();
+      loadOpenSales();
+    } catch (error: any) {
+      console.error(error);
+      toast.error("Erro ao salvar em aberto", { description: error.message });
+    } finally {
+      setIsSavingOpen(false);
+    }
+  };
+
+  // Retoma uma venda em aberto, carregando os itens no carrinho
+  const handleResumeOpenSale = (sale: OpenSaleRow) => {
+    const items: CartItem[] = (sale.items || [])
+      .filter((it) => it.product)
+      .map((it) => ({
+        ...it.product,
+        sale_price: it.unit_price,
+        quantity: it.quantity,
+        discount: it.discount_amount,
+      }));
+    setCart(items);
+    setSelectedCustomerId(sale.customer_id || null);
+    setSaleDiscountPercent(sale.discount_percent || 0);
+    setNotes(sale.notes || "");
+    setOpenSaleId(sale.id);
+    setIsOpenSalesDialogOpen(false);
+    setMobileStep(2);
+    toast.success(`Comanda #${sale.sale_number} retomada.`);
+  };
+
+  // Descarta uma venda em aberto
+  const handleDiscardOpenSale = async (sale: OpenSaleRow) => {
+    if (!confirm(`Descartar a comanda #${sale.sale_number}? Esta ação não pode ser desfeita.`))
+      return;
+    try {
+      const { error } = await supabase.rpc("discard_open_sale", { p_sale_id: sale.id });
+      if (error) throw error;
+      if (openSaleId === sale.id) resetCart();
+      toast.success("Comanda descartada.");
+      loadOpenSales();
+    } catch (error: any) {
+      console.error(error);
+      toast.error("Erro ao descartar", { description: error.message });
+    }
+  };
+
   // Create Sale transaction logic
   const handleCheckoutSubmit = async () => {
     if (!profile) return;
@@ -437,23 +583,39 @@ export default function PDVPage() {
         }
       }
 
-      // 2. Insert Sale header (aberta)
-      const { data: saleData, error: saleError } = await supabase
-        .from("sales")
-        .insert({
-          customer_id: selectedCustomerId || null,
-          seller_id: profile.id,
-          subtotal: subtotal,
-          discount_amount: totalDiscount,
-          discount_percent: saleDiscountPercent,
-          total: grandTotal,
-          status: "aberta", // Insert as 'aberta' so that changing to 'finalizada' triggers stock updates
-          notes: notes.trim() || null,
-        })
-        .select()
-        .single();
+      // 2. Cria (ou reutiliza) o cabeçalho da venda como 'aberta'
+      const header = {
+        customer_id: selectedCustomerId || null,
+        seller_id: profile.id,
+        subtotal: subtotal,
+        discount_amount: totalDiscount,
+        discount_percent: saleDiscountPercent,
+        total: grandTotal,
+        status: "aberta" as const,
+        notes: notes.trim() || null,
+      };
 
-      if (saleError) throw saleError;
+      let saleData: { id: string };
+      if (openSaleId) {
+        // Finalizando uma comanda existente — atualiza e refaz os itens
+        const { data, error } = await supabase
+          .from("sales")
+          .update(header)
+          .eq("id", openSaleId)
+          .select()
+          .single();
+        if (error) throw error;
+        saleData = data;
+        await supabase.from("sale_items").delete().eq("sale_id", openSaleId);
+      } else {
+        const { data, error: saleError } = await supabase
+          .from("sales")
+          .insert(header)
+          .select()
+          .single();
+        if (saleError) throw saleError;
+        saleData = data;
+      }
 
       // 3. Insert Sale Items
       const itemsPayload = cart.map((item) => ({
@@ -563,7 +725,9 @@ export default function PDVPage() {
       setSelectedCustomerId(null);
       setSaleDiscountPercent(0);
       setNotes("");
+      setOpenSaleId(null);
       loadData(); // Reload stock in catalog
+      loadOpenSales(); // Atualiza a lista de comandas
       toast.success("Venda finalizada com sucesso!");
 
       // Abre a impressão do recibo automaticamente
@@ -668,9 +832,20 @@ export default function PDVPage() {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <h1 className="text-xl font-bold tracking-tight">Nova Venda</h1>
-                <span className="text-xs font-semibold text-muted-foreground">
-                  Passo {mobileStep} de 4
-                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsOpenSalesDialogOpen(true)}
+                  className="h-8 text-xs text-indigo-600"
+                >
+                  <Clock className="mr-1 h-3.5 w-3.5" />
+                  Comandas
+                  {openSales.length > 0 && (
+                    <span className="ml-1 rounded-full bg-indigo-500 px-1.5 text-[10px] text-white">
+                      {openSales.length}
+                    </span>
+                  )}
+                </Button>
               </div>
               <div className="grid grid-cols-4 gap-1.5">
                 {["Cliente", "Produtos", "Pagamento", "Revisar"].map((label, i) => {
@@ -944,13 +1119,26 @@ export default function PDVPage() {
 
                 {/* Barra de ação inferior */}
                 <div className="fixed inset-x-0 bottom-0 z-20 border-t bg-background/95 p-3 backdrop-blur">
-                  <div className="mx-auto flex max-w-lg items-center gap-3">
+                  <div className="mx-auto flex max-w-lg items-center gap-2">
                     <Button
                       variant="outline"
                       onClick={() => setMobileStep(1)}
-                      className="h-12 px-4"
+                      className="h-12 px-3"
                     >
                       <ArrowLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={handleSaveOpenSale}
+                      disabled={cart.length === 0 || isSavingOpen}
+                      className="h-12 px-3"
+                      title="Salvar em aberto"
+                    >
+                      {isSavingOpen ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Save className="h-4 w-4" />
+                      )}
                     </Button>
                     <Button
                       onClick={() => setMobileStep(3)}
@@ -1473,15 +1661,31 @@ export default function PDVPage() {
             <ShoppingCart className="h-5 w-5 text-indigo-500" />
             Carrinho ({cart.reduce((acc, i) => acc + i.quantity, 0)})
           </CardTitle>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setCart([])}
-            disabled={cart.length === 0}
-            className="text-muted-foreground text-xs hover:text-rose-500"
-          >
-            Limpar
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsOpenSalesDialogOpen(true)}
+              className="text-xs text-indigo-600 hover:bg-indigo-500/10"
+            >
+              <Clock className="mr-1 h-3.5 w-3.5" />
+              Comandas
+              {openSales.length > 0 && (
+                <span className="ml-1 rounded-full bg-indigo-500 px-1.5 text-[10px] text-white">
+                  {openSales.length}
+                </span>
+              )}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={resetCart}
+              disabled={cart.length === 0}
+              className="text-muted-foreground text-xs hover:text-rose-500"
+            >
+              Limpar
+            </Button>
+          </div>
         </CardHeader>
 
         {/* Selected Customer */}
@@ -1625,24 +1829,107 @@ export default function PDVPage() {
           </div>
 
           <div className="space-y-2 pt-2">
+            {openSaleId && (
+              <p className="text-center text-[11px] font-semibold text-amber-600">
+                Editando comanda em aberto
+              </p>
+            )}
             <Input
               placeholder="Observações da venda..."
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               className="h-8 text-xs placeholder:text-muted-foreground/60"
             />
-            <Button
-              onClick={handleOpenCheckout}
-              disabled={cart.length === 0}
-              className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-bold h-11 shadow-md transition-all duration-200"
-            >
-              Registrar Pagamento
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={handleSaveOpenSale}
+                disabled={cart.length === 0 || isSavingOpen}
+                className="h-11 flex-1 font-semibold"
+              >
+                {isSavingOpen ? (
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="mr-1 h-4 w-4" />
+                )}
+                Em aberto
+              </Button>
+              <Button
+                onClick={handleOpenCheckout}
+                disabled={cart.length === 0}
+                className="h-11 flex-[2] bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-bold shadow-md transition-all duration-200"
+              >
+                Registrar Pagamento
+              </Button>
+            </div>
           </div>
         </div>
       </Card>
       </div>
       {/* ===================== DIÁLOGOS (compartilhados) ===================== */}
+
+      {/* Vendas em aberto (comandas) */}
+      <Dialog open={isOpenSalesDialogOpen} onOpenChange={setIsOpenSalesDialogOpen}>
+        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Vendas em Aberto</DialogTitle>
+            <DialogDescription>
+              Comandas salvas sem finalizar. Retome para concluir ou descarte.
+            </DialogDescription>
+          </DialogHeader>
+
+          {openSales.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              Nenhuma venda em aberto.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {openSales.map((s) => {
+                const itemCount = (s.items || []).reduce((a, i) => a + Number(i.quantity), 0);
+                return (
+                  <div
+                    key={s.id}
+                    className="flex items-center justify-between gap-3 rounded-xl border p-3"
+                  >
+                    <button
+                      onClick={() => handleResumeOpenSale(s)}
+                      className="min-w-0 flex-1 text-left"
+                    >
+                      <p className="truncate font-semibold">
+                        #{s.sale_number} ·{" "}
+                        {s.customer?.full_name || "Cliente Balcão"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {itemCount} item(ns) · R$ {Number(s.total).toFixed(2)} ·{" "}
+                        {new Date(s.created_at).toLocaleString("pt-BR")}
+                      </p>
+                    </button>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        size="sm"
+                        onClick={() => handleResumeOpenSale(s)}
+                        className="h-8 bg-indigo-600 text-white hover:bg-indigo-700"
+                      >
+                        Retomar
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleDiscardOpenSale(s)}
+                        title="Descartar"
+                        className="h-8 w-8 text-rose-500 hover:bg-rose-500/10"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
 
       {/* Checkout Dialog */}
       <Dialog open={isCheckoutOpen} onOpenChange={setIsCheckoutOpen}>
