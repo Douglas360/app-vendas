@@ -5,7 +5,7 @@
 // ============================================================
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { ReceiptData } from "@/lib/receipt";
+import { getStoreInfo, type ReceiptData } from "@/lib/receipt";
 
 export interface EvolutionConfig {
   baseUrl: string; // ex: https://evolution.suaempresa.com
@@ -226,6 +226,53 @@ export function buildWhatsappReceipt(data: ReceiptData): string {
   if (data.store.footer) lines.push(data.store.footer);
   lines.push("_Documento sem valor fiscal_");
 
+  return lines.join("\n");
+}
+
+// Envia uma mensagem de texto ao cliente, se o WhatsApp estiver conectado.
+// Retorna true se enviou; false se não está configurado/conectado.
+export async function sendCustomerMessage(
+  supabase: SupabaseClient,
+  phone: string,
+  text: string
+): Promise<boolean> {
+  const settings = await fetchEvolutionSettings(supabase);
+  if (!isConfigured(settings) || !settings.connected) return false;
+  await sendWhatsappText(settings, phone, text);
+  return true;
+}
+
+export interface PaymentMessageInput {
+  customerName: string;
+  amountPaid: number;
+  installmentNumber: number;
+  saleNumber: number | string;
+  remainingInInstallment: number;
+  installmentPaid: boolean;
+  totalDebt: number;
+}
+
+// Monta a mensagem de confirmação de pagamento de parcela
+export function buildPaymentMessage(input: PaymentMessageInput): string {
+  const store = getStoreInfo();
+  const firstName = input.customerName.split(" ")[0] || input.customerName;
+  const lines: string[] = [];
+  lines.push(`*${store.name}*`);
+  lines.push("✅ *Pagamento recebido!*");
+  lines.push("");
+  lines.push(`Olá ${firstName}, confirmamos o recebimento de *${brl(input.amountPaid)}*.`);
+  lines.push(`Parcela ${input.installmentNumber}ª · venda #${input.saleNumber}`);
+  if (input.installmentPaid) {
+    lines.push("Parcela quitada! ✔️");
+  } else {
+    lines.push(`Resta nesta parcela: ${brl(input.remainingInInstallment)}`);
+  }
+  lines.push("");
+  if (input.totalDebt > 0) {
+    lines.push(`Saldo total em aberto: *${brl(input.totalDebt)}*`);
+  } else {
+    lines.push("Você está com tudo em dia. Obrigado! 🙏");
+  }
   return lines.join("\n");
 }
 

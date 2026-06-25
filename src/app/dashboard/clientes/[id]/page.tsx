@@ -12,7 +12,11 @@ import type {
   CustomerDebtSummary,
 } from "@/lib/types/database";
 import { getStoreInfo, type ReceiptData } from "@/lib/receipt";
-import { sendReceiptToWhatsapp } from "@/lib/whatsapp";
+import {
+  sendReceiptToWhatsapp,
+  sendCustomerMessage,
+  buildPaymentMessage,
+} from "@/lib/whatsapp";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -590,15 +594,45 @@ export default function ClienteDetalhePage() {
     }
 
     setIsSubmittingPayment(true);
+    const inst = selectedInstallment;
     try {
-      const { error } = await supabase.rpc("pay_installment", {
-        p_installment_id: selectedInstallment.id,
+      const { data: updatedRaw, error } = await supabase.rpc("pay_installment", {
+        p_installment_id: inst.id,
         p_amount: amount,
       });
       if (error) throw error;
 
       toast.success("Pagamento registrado com sucesso!");
       setIsPaymentOpen(false);
+
+      // Envia confirmação no WhatsApp do cliente
+      if (customer?.phone) {
+        try {
+          const updated = Array.isArray(updatedRaw) ? updatedRaw[0] : updatedRaw;
+          const remainingNow = updated
+            ? Number(updated.amount) - Number(updated.amount_paid)
+            : remaining - amount;
+          const { data: custData } = await supabase
+            .from("customers")
+            .select("current_debt")
+            .eq("id", customer.id)
+            .single();
+          const msg = buildPaymentMessage({
+            customerName: customer.full_name,
+            amountPaid: amount,
+            installmentNumber: inst.installment_number,
+            saleNumber: inst.sale?.sale_number ?? "?",
+            remainingInInstallment: Math.max(0, remainingNow),
+            installmentPaid: remainingNow <= 0.001,
+            totalDebt: Number(custData?.current_debt ?? 0),
+          });
+          const sent = await sendCustomerMessage(supabase, customer.phone, msg);
+          if (sent) toast.success("Confirmação enviada no WhatsApp do cliente!");
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
       await loadData();
     } catch (error: unknown) {
       console.error(error);

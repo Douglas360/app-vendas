@@ -40,6 +40,7 @@ import {
   Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
+import { sendCustomerMessage, buildPaymentMessage } from "@/lib/whatsapp";
 
 type InstallmentRow = CreditInstallment & { sale?: { sale_number: number } };
 
@@ -216,7 +217,7 @@ export default function FiadoPage() {
     setIsSubmittingPayment(true);
     try {
       // Call Postgres Function pay_installment
-      const { error } = await supabase.rpc("pay_installment", {
+      const { data: updatedRaw, error } = await supabase.rpc("pay_installment", {
         p_installment_id: selectedInstallment.id,
         p_amount: amount,
       });
@@ -225,10 +226,40 @@ export default function FiadoPage() {
 
       toast.success("Pagamento registrado com sucesso!");
       setIsPaymentOpen(false);
-      
+
+      // Envia confirmação no WhatsApp do cliente
+      const debtor = selectedDebtor;
+      const inst = selectedInstallment;
+      if (debtor.phone) {
+        try {
+          const updated = Array.isArray(updatedRaw) ? updatedRaw[0] : updatedRaw;
+          const remainingNow = updated
+            ? Number(updated.amount) - Number(updated.amount_paid)
+            : remaining - amount;
+          const { data: custData } = await supabase
+            .from("customers")
+            .select("current_debt")
+            .eq("id", debtor.id)
+            .single();
+          const msg = buildPaymentMessage({
+            customerName: debtor.full_name,
+            amountPaid: amount,
+            installmentNumber: inst.installment_number,
+            saleNumber: (inst as InstallmentRow).sale?.sale_number ?? "?",
+            remainingInInstallment: Math.max(0, remainingNow),
+            installmentPaid: remainingNow <= 0.001,
+            totalDebt: Number(custData?.current_debt ?? 0),
+          });
+          const sent = await sendCustomerMessage(supabase, debtor.phone, msg);
+          if (sent) toast.success("Confirmação enviada no WhatsApp do cliente!");
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
       // Refresh current debtor details
       await loadDebtorDetails(selectedDebtor);
-      
+
       // Refresh general list
       fetchDebtors();
     } catch (error: any) {
