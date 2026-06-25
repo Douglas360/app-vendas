@@ -7,9 +7,12 @@ import { createClient } from "@/lib/supabase/client";
 import type {
   Customer,
   Sale,
+  Product,
   CreditInstallment,
   CustomerDebtSummary,
 } from "@/lib/types/database";
+import { getStoreInfo, type ReceiptData } from "@/lib/receipt";
+import { sendReceiptToWhatsapp } from "@/lib/whatsapp";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,6 +28,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -52,6 +62,9 @@ import {
   MessageCircle,
   Receipt,
   Pencil,
+  XCircle,
+  Trash2,
+  Minus,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -66,6 +79,24 @@ function maskPhoneBR(value: string): string {
   if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
   if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
   return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+}
+
+const PAYMENT_LABELS: Record<string, string> = {
+  dinheiro: "Dinheiro",
+  pix: "PIX",
+  cartao_debito: "Cartão de Débito",
+  cartao_credito: "Cartão de Crédito",
+  fiado: "Crediário",
+};
+
+interface EditSaleItem {
+  product_id: string;
+  name: string;
+  unit: string;
+  quantity: number;
+  unit_price: number;
+  discount_amount: number;
+  cost_price: number;
 }
 
 const emptyCustomerForm = {
@@ -129,6 +160,16 @@ export default function ClienteDetalhePage() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
 
+  // Edit / cancel sale
+  const [editSale, setEditSale] = useState<Sale | null>(null);
+  const [isEditSaleOpen, setIsEditSaleOpen] = useState(false);
+  const [editSaleItems, setEditSaleItems] = useState<EditSaleItem[]>([]);
+  const [editSaleDiscount, setEditSaleDiscount] = useState(0);
+  const [saleProducts, setSaleProducts] = useState<Product[]>([]);
+  const [addProductId, setAddProductId] = useState("");
+  const [isSavingSale, setIsSavingSale] = useState(false);
+  const [cancellingSaleId, setCancellingSaleId] = useState<string | null>(null);
+
   // Edit customer dialog
   const [isEditCustomerOpen, setIsEditCustomerOpen] = useState(false);
   const [customerForm, setCustomerForm] = useState(emptyCustomerForm);
@@ -162,6 +203,7 @@ export default function ClienteDetalhePage() {
           .from("sales")
           .select(
             `*,
+            seller:profiles(full_name),
             items:sale_items(*, product:products(name, sku, unit)),
             payments:payments(*)`
           )
@@ -229,6 +271,177 @@ export default function ClienteDetalhePage() {
       `Olá ${customer.full_name.split(" ")[0]}, tudo bem?`
     );
     window.open(`https://wa.me/${intl}?text=${text}`, "_blank");
+  }
+
+  // ---- Editar / cancelar compra ----
+  async function handleOpenEditSale(sale: Sale) {
+    setEditSale(sale);
+    setEditSaleItems(
+      (sale.items || []).map((it) => ({
+        product_id: it.product_id,
+        name: it.product?.name || "Produto",
+        unit: it.product?.unit || "un",
+        quantity: it.quantity,
+        unit_price: it.unit_price,
+        discount_amount: it.discount_amount,
+        cost_price: it.cost_price,
+      }))
+    );
+    setEditSaleDiscount(sale.discount_percent || 0);
+    setAddProductId("");
+    setIsEditSaleOpen(true);
+    // carrega produtos para adicionar
+    const { data } = await supabase
+      .from("products")
+      .select("*")
+      .eq("is_active", true)
+      .order("name");
+    setSaleProducts((data as Product[]) || []);
+  }
+
+  function updateEditItem(index: number, field: keyof EditSaleItem, value: number) {
+    setEditSaleItems((prev) =>
+      prev.map((it, i) => (i === index ? { ...it, [field]: Math.max(0, value) } : it))
+    );
+  }
+
+  function removeEditItem(index: number) {
+    setEditSaleItems((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function addEditItem() {
+    const prod = saleProducts.find((p) => p.id === addProductId);
+    if (!prod) return;
+    setEditSaleItems((prev) => {
+      const existing = prev.find((i) => i.product_id === prod.id);
+      if (existing) {
+        return prev.map((i) =>
+          i.product_id === prod.id ? { ...i, quantity: i.quantity + 1 } : i
+        );
+      }
+      return [
+        ...prev,
+        {
+          product_id: prod.id,
+          name: prod.name,
+          unit: prod.unit || "un",
+          quantity: 1,
+          unit_price: prod.sale_price,
+          discount_amount: 0,
+          cost_price: prod.cost_price,
+        },
+      ];
+    });
+    setAddProductId("");
+  }
+
+  const editSubtotal = editSaleItems.reduce(
+    (acc, it) => acc + (it.quantity * it.unit_price - it.discount_amount),
+    0
+  );
+  const editTotal = Math.max(0, editSubtotal - (editSubtotal * editSaleDiscount) / 100);
+
+  async function handleSaveEditSale() {
+    if (!editSale) return;
+    if (editSaleItems.length === 0) {
+      toast.error("A compra precisa ter ao menos um item.");
+      return;
+    }
+    setIsSavingSale(true);
+    try {
+      const itemsPayload = editSaleItems.map((it) => ({
+        product_id: it.product_id,
+        quantity: it.quantity,
+        unit_price: it.unit_price,
+        cost_price: it.cost_price,
+        discount_amount: it.discount_amount,
+      }));
+
+      const { error } = await supabase.rpc("edit_sale_items", {
+        p_sale_id: editSale.id,
+        p_items: itemsPayload,
+        p_discount_percent: editSaleDiscount,
+      });
+      if (error) throw error;
+
+      toast.success("Compra atualizada com sucesso!");
+      setIsEditSaleOpen(false);
+
+      // Reenvia o comprovante no WhatsApp do cliente
+      if (customer?.phone) {
+        try {
+          const method = editSale.payments?.[0]?.method || "dinheiro";
+          let installments: ReceiptData["installments"];
+          if (method === "fiado") {
+            const { data: insts } = await supabase
+              .from("credit_installments")
+              .select("installment_number, amount, due_date")
+              .eq("sale_id", editSale.id)
+              .order("installment_number", { ascending: true });
+            installments = (insts || []).map(
+              (i: { installment_number: number; amount: number; due_date: string }) => ({
+                number: i.installment_number,
+                amount: i.amount,
+                dueDate: i.due_date,
+              })
+            );
+          }
+          const receipt: ReceiptData = {
+            store: getStoreInfo(),
+            saleNumber: editSale.sale_number,
+            date: editSale.created_at || new Date().toISOString(),
+            seller: editSale.seller?.full_name || "—",
+            customer: customer.full_name,
+            items: editSaleItems.map((it) => ({
+              name: it.name,
+              quantity: it.quantity,
+              unit: it.unit,
+              unitPrice: it.unit_price,
+              total: it.quantity * it.unit_price - it.discount_amount,
+            })),
+            subtotal: editSubtotal,
+            discount: (editSubtotal * editSaleDiscount) / 100,
+            total: editTotal,
+            paymentMethodLabel: PAYMENT_LABELS[method] || method,
+            installments,
+          };
+          const sent = await sendReceiptToWhatsapp(supabase, receipt, customer.phone);
+          if (sent) toast.success("Comprovante atualizado enviado no WhatsApp!");
+        } catch {
+          toast.error("Compra salva, mas falhou ao enviar o comprovante no WhatsApp.");
+        }
+      }
+
+      await loadData();
+    } catch (error: unknown) {
+      console.error(error);
+      const message = error instanceof Error ? error.message : "Tente novamente.";
+      toast.error("Erro ao editar a compra", { description: message });
+    } finally {
+      setIsSavingSale(false);
+    }
+  }
+
+  async function handleCancelSale(sale: Sale) {
+    if (
+      !confirm(
+        `Cancelar a venda #${sale.sale_number}? O estoque será devolvido e, se for crediário, as parcelas serão canceladas.`
+      )
+    )
+      return;
+    setCancellingSaleId(sale.id);
+    try {
+      const { error } = await supabase.rpc("cancel_sale", { p_sale_id: sale.id });
+      if (error) throw error;
+      toast.success("Venda cancelada.");
+      await loadData();
+    } catch (error: unknown) {
+      console.error(error);
+      const message = error instanceof Error ? error.message : "Tente novamente.";
+      toast.error("Erro ao cancelar a venda", { description: message });
+    } finally {
+      setCancellingSaleId(null);
+    }
   }
 
   // Editar cliente
@@ -735,6 +948,33 @@ export default function ClienteDetalhePage() {
                                       Obs: {sale.notes}
                                     </p>
                                   )}
+                                  {isAdmin && sale.status === "finalizada" && (
+                                    <div className="flex flex-wrap justify-end gap-2 border-t pt-3">
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleOpenEditSale(sale)}
+                                        className="text-blue-600 border-blue-500/30 hover:bg-blue-500/10"
+                                      >
+                                        <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                                        Editar compra
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleCancelSale(sale)}
+                                        disabled={cancellingSaleId === sale.id}
+                                        className="text-rose-600 border-rose-500/30 hover:bg-rose-500/10"
+                                      >
+                                        {cancellingSaleId === sale.id ? (
+                                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                                        ) : (
+                                          <XCircle className="mr-1.5 h-3.5 w-3.5" />
+                                        )}
+                                        Cancelar
+                                      </Button>
+                                    </div>
+                                  )}
                                 </div>
                               </TableCell>
                             </TableRow>
@@ -965,6 +1205,168 @@ export default function ClienteDetalhePage() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Edit Sale Dialog */}
+      <Dialog open={isEditSaleOpen} onOpenChange={setIsEditSaleOpen}>
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Editar Compra #{editSale?.sale_number}</DialogTitle>
+            <DialogDescription>
+              Ajuste itens, quantidades e preços. O total, o estoque e as parcelas são
+              recalculados, e o comprovante é reenviado no WhatsApp.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            {/* Itens */}
+            <div className="space-y-2">
+              {editSaleItems.length === 0 ? (
+                <p className="py-4 text-center text-sm text-muted-foreground">
+                  Nenhum item. Adicione um produto abaixo.
+                </p>
+              ) : (
+                editSaleItems.map((it, index) => (
+                  <div key={`${it.product_id}-${index}`} className="rounded-lg border p-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="min-w-0 flex-1 truncate text-sm font-medium">{it.name}</p>
+                      <button
+                        onClick={() => removeEditItem(index)}
+                        className="p-1 text-muted-foreground hover:text-rose-500"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-end gap-2">
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => updateEditItem(index, "quantity", it.quantity - 1)}
+                          className="h-8 w-8"
+                        >
+                          <Minus className="h-3.5 w-3.5" />
+                        </Button>
+                        <Input
+                          type="number"
+                          inputMode="decimal"
+                          value={it.quantity}
+                          onChange={(e) =>
+                            updateEditItem(index, "quantity", parseFloat(e.target.value) || 0)
+                          }
+                          className="h-8 w-14 text-center text-sm"
+                        />
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => updateEditItem(index, "quantity", it.quantity + 1)}
+                          className="h-8 w-8"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                      <div className="space-y-0.5">
+                        <Label className="text-[10px] text-muted-foreground">Unit R$</Label>
+                        <Input
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          value={it.unit_price}
+                          onChange={(e) =>
+                            updateEditItem(index, "unit_price", parseFloat(e.target.value) || 0)
+                          }
+                          className="h-8 w-20 text-sm"
+                        />
+                      </div>
+                      <div className="space-y-0.5">
+                        <Label className="text-[10px] text-muted-foreground">Desc R$</Label>
+                        <Input
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          value={it.discount_amount || ""}
+                          placeholder="0"
+                          onChange={(e) =>
+                            updateEditItem(index, "discount_amount", parseFloat(e.target.value) || 0)
+                          }
+                          className="h-8 w-16 text-sm"
+                        />
+                      </div>
+                      <span className="ml-auto text-sm font-bold">
+                        {currency(it.quantity * it.unit_price - it.discount_amount)}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Adicionar produto */}
+            <div className="flex items-center gap-2 border-t pt-3">
+              <Select value={addProductId} onValueChange={setAddProductId}>
+                <SelectTrigger className="h-9 flex-1">
+                  <SelectValue placeholder="Adicionar produto..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {saleProducts.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name} — {currency(p.sale_price)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={addEditItem}
+                disabled={!addProductId}
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+
+            {/* Desconto + total */}
+            <div className="flex items-center justify-between rounded-lg border p-3">
+              <span className="flex items-center gap-1.5 text-sm">Desconto (%)</span>
+              <Input
+                type="number"
+                inputMode="numeric"
+                min="0"
+                max="100"
+                value={editSaleDiscount || ""}
+                placeholder="0"
+                onChange={(e) =>
+                  setEditSaleDiscount(Math.min(100, Math.max(0, parseInt(e.target.value) || 0)))
+                }
+                className="h-9 w-20 text-right"
+              />
+            </div>
+            <div className="flex items-center justify-between rounded-lg bg-indigo-500/5 p-3">
+              <span className="text-sm font-bold">Novo total</span>
+              <span className="text-xl font-extrabold text-indigo-600 dark:text-indigo-400">
+                {currency(editTotal)}
+              </span>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsEditSaleOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSaveEditSale}
+              disabled={isSavingSale || editSaleItems.length === 0}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold"
+            >
+              {isSavingSale && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Salvar e reenviar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit Customer Dialog */}
       <Dialog open={isEditCustomerOpen} onOpenChange={setIsEditCustomerOpen}>
