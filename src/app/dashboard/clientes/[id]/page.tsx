@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useAuth } from "@/components/providers/auth-provider";
 import { createClient } from "@/lib/supabase/client";
 import type {
   Customer,
@@ -49,6 +50,7 @@ import {
   Plus,
   MessageCircle,
   Receipt,
+  Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -81,6 +83,8 @@ export default function ClienteDetalhePage() {
   const customerId = params?.id;
   const router = useRouter();
   const supabase = createClient();
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin";
 
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [sales, setSales] = useState<Sale[]>([]);
@@ -96,6 +100,13 @@ export default function ClienteDetalhePage() {
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+
+  // Edit installment dialog
+  const [editInstallment, setEditInstallment] = useState<InstallmentRow | null>(null);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editAmount, setEditAmount] = useState("");
+  const [editDueDate, setEditDueDate] = useState("");
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!customerId) return;
@@ -185,6 +196,56 @@ export default function ClienteDetalhePage() {
       `Olá ${customer.full_name.split(" ")[0]}, tudo bem?`
     );
     window.open(`https://wa.me/${intl}?text=${text}`, "_blank");
+  }
+
+  // Editar parcela (valor e vencimento)
+  function handleOpenEdit(inst: InstallmentRow) {
+    setEditInstallment(inst);
+    setEditAmount(inst.amount.toFixed(2));
+    setEditDueDate(inst.due_date);
+    setIsEditOpen(true);
+  }
+
+  async function handleSaveEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editInstallment) return;
+
+    const amount = parseFloat(editAmount);
+    if (isNaN(amount) || amount <= 0) {
+      toast.error("Informe um valor válido.");
+      return;
+    }
+    if (amount < editInstallment.amount_paid) {
+      toast.error("Valor inválido", {
+        description: `Já foram pagos ${currency(editInstallment.amount_paid)} nesta parcela.`,
+      });
+      return;
+    }
+    if (!editDueDate) {
+      toast.error("Informe a data de vencimento.");
+      return;
+    }
+
+    setIsSavingEdit(true);
+    try {
+      const newStatus =
+        amount <= editInstallment.amount_paid + 0.001 ? "pago" : editInstallment.status;
+      const { error } = await supabase
+        .from("credit_installments")
+        .update({ amount, due_date: editDueDate, status: newStatus })
+        .eq("id", editInstallment.id);
+      if (error) throw error;
+
+      toast.success("Parcela atualizada!");
+      setIsEditOpen(false);
+      await loadData();
+    } catch (error: unknown) {
+      console.error(error);
+      const message = error instanceof Error ? error.message : "Tente novamente.";
+      toast.error("Erro ao atualizar a parcela", { description: message });
+    } finally {
+      setIsSavingEdit(false);
+    }
   }
 
   // Baixa de parcela
@@ -676,20 +737,33 @@ export default function ClienteDetalhePage() {
                               </Badge>
                             </TableCell>
                             <TableCell className="text-right">
-                              {!isPaid ? (
-                                <Button
-                                  size="sm"
-                                  onClick={() => handleOpenPayment(inst)}
-                                  className="h-7 px-2.5 text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
-                                >
-                                  Receber
-                                </Button>
-                              ) : (
-                                <span className="flex items-center justify-end gap-1 text-[10px] text-muted-foreground italic">
-                                  <CheckCircle className="h-3 w-3 text-emerald-500" />
-                                  {inst.status}
-                                </span>
-                              )}
+                              <div className="flex items-center justify-end gap-1">
+                                {isAdmin && !isPaid && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleOpenEdit(inst)}
+                                    title="Editar parcela"
+                                    className="h-7 w-7 text-blue-500 hover:bg-blue-500/10 hover:text-blue-600"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </Button>
+                                )}
+                                {!isPaid ? (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleOpenPayment(inst)}
+                                    className="h-7 px-2.5 text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                                  >
+                                    Receber
+                                  </Button>
+                                ) : (
+                                  <span className="flex items-center justify-end gap-1 text-[10px] text-muted-foreground italic">
+                                    <CheckCircle className="h-3 w-3 text-emerald-500" />
+                                    {inst.status}
+                                  </span>
+                                )}
+                              </div>
                             </TableCell>
                           </TableRow>
                         );
@@ -778,6 +852,83 @@ export default function ClienteDetalhePage() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Edit Installment Dialog */}
+      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Editar Parcela</DialogTitle>
+            <DialogDescription>
+              Ajuste o valor e a data de vencimento. A dívida do cliente é recalculada
+              automaticamente.
+            </DialogDescription>
+          </DialogHeader>
+
+          {editInstallment && (
+            <form onSubmit={handleSaveEdit} className="space-y-4 pt-2">
+              <div className="rounded-xl border bg-muted/40 p-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Parcela</span>
+                  <span className="font-semibold">
+                    {editInstallment.installment_number}ª · venda #
+                    {editInstallment.sale?.sale_number ?? "?"}
+                  </span>
+                </div>
+                <div className="flex justify-between text-emerald-600">
+                  <span>Já pago</span>
+                  <span className="font-semibold">
+                    {currency(editInstallment.amount_paid)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-amount">Valor da parcela (R$)</Label>
+                <Input
+                  id="edit-amount"
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  min="0.01"
+                  value={editAmount}
+                  onChange={(e) => setEditAmount(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-due">Data de vencimento</Label>
+                <Input
+                  id="edit-due"
+                  type="date"
+                  value={editDueDate}
+                  onChange={(e) => setEditDueDate(e.target.value)}
+                  required
+                />
+              </div>
+
+              <DialogFooter className="gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsEditOpen(false)}
+                  className="w-full"
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isSavingEdit}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold"
+                >
+                  {isSavingEdit && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Salvar
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Payment Dialog */}
       <Dialog open={isPaymentOpen} onOpenChange={setIsPaymentOpen}>

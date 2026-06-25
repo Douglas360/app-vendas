@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useAuth } from "@/components/providers/auth-provider";
 import { createClient } from "@/lib/supabase/client";
 import type { Customer, CreditInstallment, CustomerDebtSummary } from "@/lib/types/database";
 import { Button } from "@/components/ui/button";
@@ -36,11 +37,16 @@ import {
   UserCheck,
   Calendar,
   CheckCircle,
+  Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
 
+type InstallmentRow = CreditInstallment & { sale?: { sale_number: number } };
+
 export default function FiadoPage() {
   const supabase = createClient();
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin";
 
   const [debtors, setDebtors] = useState<Customer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -58,6 +64,13 @@ export default function FiadoPage() {
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+
+  // Edit Installment Dialog State
+  const [editInstallment, setEditInstallment] = useState<InstallmentRow | null>(null);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editAmount, setEditAmount] = useState("");
+  const [editDueDate, setEditDueDate] = useState("");
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   // Fetch all customers who have current debt > 0
   const fetchDebtors = useCallback(async () => {
@@ -130,6 +143,56 @@ export default function FiadoPage() {
     const remaining = installment.amount - installment.amount_paid;
     setPaymentAmount(remaining.toString());
     setIsPaymentOpen(true);
+  };
+
+  // Editar parcela (valor e vencimento)
+  const handleOpenEdit = (installment: InstallmentRow) => {
+    setEditInstallment(installment);
+    setEditAmount(installment.amount.toFixed(2));
+    setEditDueDate(installment.due_date);
+    setIsEditOpen(true);
+  };
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editInstallment || !selectedDebtor) return;
+
+    const amount = parseFloat(editAmount);
+    if (isNaN(amount) || amount <= 0) {
+      toast.error("Informe um valor válido.");
+      return;
+    }
+    if (amount < editInstallment.amount_paid) {
+      toast.error("Valor inválido", {
+        description: `Já foram pagos R$ ${editInstallment.amount_paid.toFixed(2)} nesta parcela.`,
+      });
+      return;
+    }
+    if (!editDueDate) {
+      toast.error("Informe a data de vencimento.");
+      return;
+    }
+
+    setIsSavingEdit(true);
+    try {
+      const newStatus =
+        amount <= editInstallment.amount_paid + 0.001 ? "pago" : editInstallment.status;
+      const { error } = await supabase
+        .from("credit_installments")
+        .update({ amount, due_date: editDueDate, status: newStatus })
+        .eq("id", editInstallment.id);
+      if (error) throw error;
+
+      toast.success("Parcela atualizada!");
+      setIsEditOpen(false);
+      await loadDebtorDetails(selectedDebtor);
+      fetchDebtors();
+    } catch (error: any) {
+      console.error(error);
+      toast.error("Erro ao atualizar a parcela", { description: error.message });
+    } finally {
+      setIsSavingEdit(false);
+    }
   };
 
   // Confirm payment via Supabase RPC pay_installment
@@ -422,13 +485,26 @@ export default function FiadoPage() {
                               </TableCell>
                               <TableCell className="text-right">
                                 {inst.status !== "pago" && inst.status !== "cancelado" ? (
-                                  <Button
-                                    size="sm"
-                                    onClick={() => handleOpenPayment(inst)}
-                                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-7 text-[10px] px-2.5"
-                                  >
-                                    Receber
-                                  </Button>
+                                  <div className="flex items-center justify-end gap-1">
+                                    {isAdmin && (
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={() => handleOpenEdit(inst)}
+                                        title="Editar parcela"
+                                        className="h-7 w-7 text-blue-500 hover:bg-blue-500/10 hover:text-blue-600"
+                                      >
+                                        <Pencil className="h-3.5 w-3.5" />
+                                      </Button>
+                                    )}
+                                    <Button
+                                      size="sm"
+                                      onClick={() => handleOpenPayment(inst)}
+                                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-7 text-[10px] px-2.5"
+                                    >
+                                      Receber
+                                    </Button>
+                                  </div>
                                 ) : (
                                   <span className="text-muted-foreground text-[10px] italic flex items-center justify-end gap-1 font-medium">
                                     <CheckCircle className="h-3 w-3 text-emerald-500" />
@@ -452,6 +528,78 @@ export default function FiadoPage() {
               Fechar Extrato
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Installment Modal */}
+      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Editar Parcela</DialogTitle>
+            <DialogDescription>
+              Ajuste o valor e a data de vencimento. A dívida do cliente é recalculada
+              automaticamente.
+            </DialogDescription>
+          </DialogHeader>
+
+          {editInstallment && (
+            <form onSubmit={handleSaveEdit} className="space-y-4 pt-2">
+              <div className="rounded-xl border bg-muted/40 p-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Parcela</span>
+                  <span className="font-semibold">{editInstallment.installment_number}ª</span>
+                </div>
+                <div className="flex justify-between text-emerald-600">
+                  <span>Já pago</span>
+                  <span className="font-semibold">R$ {editInstallment.amount_paid.toFixed(2)}</span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="fiado-edit-amount">Valor da parcela (R$)</Label>
+                <Input
+                  id="fiado-edit-amount"
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  min="0.01"
+                  value={editAmount}
+                  onChange={(e) => setEditAmount(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="fiado-edit-due">Data de vencimento</Label>
+                <Input
+                  id="fiado-edit-due"
+                  type="date"
+                  value={editDueDate}
+                  onChange={(e) => setEditDueDate(e.target.value)}
+                  required
+                />
+              </div>
+
+              <DialogFooter className="gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsEditOpen(false)}
+                  className="w-full"
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isSavingEdit}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold"
+                >
+                  {isSavingEdit && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Salvar
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
         </DialogContent>
       </Dialog>
 
