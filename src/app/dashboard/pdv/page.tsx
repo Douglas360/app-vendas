@@ -1107,21 +1107,55 @@ export default function PDVPage() {
                           />
                         </div>
 
-                        {/* Resumo das parcelas geradas */}
+                        {/* Parcelas — valor e vencimento editáveis */}
                         {generatedInstallments.length > 0 && (
-                          <div className="space-y-1 rounded-lg border bg-background p-2.5">
-                            {generatedInstallments.map((inst) => (
-                              <div
-                                key={inst.installment_number}
-                                className="flex justify-between text-xs"
-                              >
-                                <span className="text-muted-foreground">
-                                  {inst.installment_number}ª ·{" "}
-                                  {new Date(inst.due_date + "T00:00:00").toLocaleDateString("pt-BR")}
+                          <div className="space-y-2">
+                            <Label className="text-xs font-semibold text-muted-foreground">
+                              Parcelas (ajuste valor e vencimento)
+                            </Label>
+                            <div className="space-y-2">
+                              {generatedInstallments.map((inst, index) => (
+                                <div
+                                  key={inst.installment_number}
+                                  className="flex items-center gap-2"
+                                >
+                                  <span className="w-7 shrink-0 text-xs font-bold text-muted-foreground">
+                                    {inst.installment_number}ª
+                                  </span>
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-xs text-muted-foreground">R$</span>
+                                    <Input
+                                      type="number"
+                                      inputMode="decimal"
+                                      step="0.01"
+                                      value={inst.amount}
+                                      onChange={(e) =>
+                                        handleUpdateInstallment(index, "amount", e.target.value)
+                                      }
+                                      className="h-10 w-20 text-sm"
+                                    />
+                                  </div>
+                                  <Input
+                                    type="date"
+                                    value={inst.due_date}
+                                    onChange={(e) =>
+                                      handleUpdateInstallment(index, "due_date", e.target.value)
+                                    }
+                                    className="h-10 flex-1 text-sm"
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                            {!isInstallmentsSumValid && (
+                              <div className="flex items-center gap-1.5 rounded border border-rose-500/10 bg-rose-500/5 p-2 text-[11px] font-semibold text-rose-500">
+                                <AlertTriangle className="h-4 w-4 shrink-0" />
+                                <span>
+                                  As parcelas somam R$ {installmentsTotalSum.toFixed(2)} (falta R${" "}
+                                  {(grandTotal - installmentsTotalSum).toFixed(2)}). Ajuste para
+                                  prosseguir.
                                 </span>
-                                <span className="font-semibold">R$ {inst.amount.toFixed(2)}</span>
                               </div>
-                            ))}
+                            )}
                           </div>
                         )}
                         {selectedCustomer && (
@@ -1189,7 +1223,7 @@ export default function PDVPage() {
                       onClick={() => setMobileStep(4)}
                       disabled={
                         paymentMethod === "fiado" &&
-                        (!selectedCustomerId || !isCreditAllowed())
+                        (!selectedCustomerId || !isCreditAllowed() || !isInstallmentsSumValid)
                       }
                       className="h-12 flex-1 bg-indigo-600 text-base font-bold text-white hover:bg-indigo-700"
                     >
