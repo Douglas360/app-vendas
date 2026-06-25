@@ -167,12 +167,12 @@ export default function DashboardPage() {
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
 
-      // 1. Fetch sales today
+      // 1. Fetch sales today (pela data de faturamento; edições contam no dia da edição)
       const { data: salesToday, error: salesError } = await supabase
         .from("sales")
         .select("total, status")
         .eq("status", "finalizada")
-        .gte("created_at", todayStart.toISOString());
+        .gte("finalized_at", todayStart.toISOString());
 
       if (salesError) throw salesError;
 
