@@ -54,6 +54,7 @@ import { toast } from "sonner";
 import {
   printReceipt,
   getStoreInfo,
+  isAutoPrintReceiptEnabled,
   type ReceiptData,
 } from "@/lib/receipt";
 import { sendReceiptToWhatsapp } from "@/lib/whatsapp";
@@ -730,8 +731,10 @@ export default function PDVPage() {
       loadOpenSales(); // Atualiza a lista de comandas
       toast.success("Venda finalizada com sucesso!");
 
-      // Abre a impressão do recibo automaticamente
-      printReceipt(receipt);
+      // Abre a impressão do recibo automaticamente (se ativado nas configurações)
+      if (isAutoPrintReceiptEnabled()) {
+        printReceipt(receipt);
+      }
 
       // Envia o comprovante no WhatsApp do cliente (se conectado e com telefone)
       const customerPhone = selectedCustomer?.phone;

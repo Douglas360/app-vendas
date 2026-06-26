@@ -79,6 +79,19 @@ export function saveStoreInfo(info: StoreInfo) {
   localStorage.setItem(STORE_KEYS.paperWidth, info.paperWidth || "80");
 }
 
+// Preferência: imprimir o recibo automaticamente ao finalizar a venda (padrão: sim)
+const AUTO_PRINT_KEY = "app_vendas_auto_print_receipt";
+
+export function isAutoPrintReceiptEnabled(): boolean {
+  if (typeof window === "undefined") return true;
+  return localStorage.getItem(AUTO_PRINT_KEY) !== "false";
+}
+
+export function setAutoPrintReceipt(value: boolean) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(AUTO_PRINT_KEY, value ? "true" : "false");
+}
+
 function brl(value: number): string {
   return value.toLocaleString("pt-BR", {
     style: "currency",

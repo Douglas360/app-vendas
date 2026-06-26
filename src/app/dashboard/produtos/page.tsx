@@ -944,7 +944,7 @@ export default function ProdutosPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Produto</TableHead>
+                  <TableHead className="w-[220px]">Produto</TableHead>
                   <TableHead>SKU / Cód. Barras</TableHead>
                   <TableHead>Categoria</TableHead>
                   <TableHead className="text-right">Estoque</TableHead>
@@ -1008,26 +1008,27 @@ export default function ProdutosPage() {
                               </div>
                             )}
                           </div>
-                          <div>
+                          <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2">
                               {isAdmin ? (
                                 <button
                                   onClick={() => handleEditProduct(prod)}
-                                  className="font-semibold text-left transition-colors hover:text-indigo-600 hover:underline"
+                                  title={prod.name}
+                                  className="block truncate max-w-[150px] font-semibold text-left transition-colors hover:text-indigo-600 hover:underline"
                                 >
                                   {prod.name}
                                 </button>
                               ) : (
-                                <p className="font-semibold">{prod.name}</p>
+                                <p className="block truncate max-w-[150px] font-semibold">{prod.name}</p>
                               )}
                               {hasVariants && (
-                                <Badge variant="secondary" className="text-[10px] bg-purple-500/10 text-purple-600 border-purple-500/20 font-bold px-1.5 py-0.5">
+                                <Badge variant="secondary" className="shrink-0 text-[10px] bg-purple-500/10 text-purple-600 border-purple-500/20 font-bold px-1.5 py-0.5">
                                   {children.length} var.
                                 </Badge>
                               )}
                             </div>
                             {prod.description && (
-                              <p className="text-xs text-muted-foreground line-clamp-1">
+                              <p className="truncate max-w-[190px] text-xs text-muted-foreground">
                                 {prod.description}
                               </p>
                             )}

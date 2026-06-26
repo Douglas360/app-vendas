@@ -38,6 +38,8 @@ import {
   getStoreInfo,
   saveStoreInfo,
   printReceipt,
+  isAutoPrintReceiptEnabled,
+  setAutoPrintReceipt,
   type StoreInfo,
 } from "@/lib/receipt";
 import {
@@ -87,6 +89,22 @@ export default function ConfiguracoesPage() {
 
   // Dados da loja (para o cabeçalho do recibo)
   const [store, setStore] = useState<StoreInfo>(() => getStoreInfo());
+  const [autoPrint, setAutoPrint] = useState(true);
+
+  useEffect(() => {
+    setAutoPrint(isAutoPrintReceiptEnabled());
+  }, []);
+
+  function handleToggleAutoPrint(value: boolean) {
+    setAutoPrint(value);
+    setAutoPrintReceipt(value);
+    toast.success(
+      value
+        ? "Recibo automático ativado."
+        : "Recibo automático desativado.",
+      { description: "Você ainda pode imprimir manualmente após a venda." }
+    );
+  }
 
   function handleSaveAISettings() {
     localStorage.setItem("app_vendas_gemini_key", geminiKey.trim());
@@ -690,6 +708,28 @@ export default function ConfiguracoesPage() {
                   No diálogo de impressão, selecione papel “80mm/Rolo” (ou “Salvar como PDF”) para sair no tamanho de cupom.
                 </p>
               </div>
+
+              <label
+                htmlFor="auto-print"
+                className="sm:col-span-2 flex items-center justify-between gap-3 rounded-lg border p-3 cursor-pointer"
+              >
+                <div>
+                  <span className="block text-sm font-medium">
+                    Imprimir recibo automaticamente
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    Ao finalizar a venda, abre a impressão do cupom. Se desligado, você imprime
+                    manualmente pelo botão “Imprimir Recibo”.
+                  </span>
+                </div>
+                <input
+                  id="auto-print"
+                  type="checkbox"
+                  checked={autoPrint}
+                  onChange={(e) => handleToggleAutoPrint(e.target.checked)}
+                  className="h-5 w-5 shrink-0 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                />
+              </label>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button
