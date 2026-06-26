@@ -47,6 +47,8 @@ import {
   X,
   Sparkles,
   Copy,
+  Barcode,
+  Download,
 } from "lucide-react";
 import Image from "next/image";
 import { toast } from "sonner";
@@ -70,6 +72,8 @@ export default function ProdutosPage() {
 
   // Product Dialog State
   const [isProductDialogOpen, setIsProductDialogOpen] = useState(false);
+  const [isLabelsOpen, setIsLabelsOpen] = useState(false);
+  const [isGeneratingBarcodes, setIsGeneratingBarcodes] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [productForm, setProductForm] = useState({
     name: "",
@@ -794,6 +798,59 @@ export default function ProdutosPage() {
     }
   }
 
+  // ---- Etiquetas / códigos de barras ----
+  // Produtos vendáveis = simples + variações (exclui o "pai" que tem variações)
+  const sellableProducts = products.filter(
+    (p) => !products.some((c) => c.parent_id === p.id)
+  );
+  const missingBarcodeCount = sellableProducts.filter(
+    (p) => !p.barcode || p.barcode.trim() === ""
+  ).length;
+
+  async function handleGenerateBarcodes() {
+    setIsGeneratingBarcodes(true);
+    try {
+      const { data, error } = await supabase.rpc("generate_missing_barcodes");
+      if (error) throw error;
+      toast.success(`${data ?? 0} código(s) de barras gerado(s).`);
+      await fetchData();
+    } catch (error: any) {
+      console.error(error);
+      toast.error("Erro ao gerar códigos", { description: error.message });
+    } finally {
+      setIsGeneratingBarcodes(false);
+    }
+  }
+
+  function handleExportLabels() {
+    const rows = sellableProducts.filter((p) => p.barcode && p.barcode.trim() !== "");
+    if (rows.length === 0) {
+      toast.error("Nenhum produto com código de barras para exportar.");
+      return;
+    }
+    const esc = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
+    const header = ["Nome", "CodigoBarras", "Preco"].join(";");
+    const lines = rows.map((p) =>
+      [
+        esc(p.name),
+        esc(p.barcode || ""),
+        esc(`R$ ${p.sale_price.toFixed(2).replace(".", ",")}`),
+      ].join(";")
+    );
+    // BOM para o Excel ler acentos corretamente
+    const csv = "﻿" + [header, ...lines].join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `etiquetas-produtos-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success(`Planilha exportada (${rows.length} produtos).`);
+  }
+
   // Delete Product
   async function handleDeleteProduct(id: string) {
     if (!isAdmin) return;
@@ -880,6 +937,10 @@ export default function ProdutosPage() {
           </Button>
           {isAdmin && (
             <>
+              <Button variant="outline" size="sm" onClick={() => setIsLabelsOpen(true)}>
+                <Barcode className="h-4 w-4 mr-2" />
+                Etiquetas
+              </Button>
               <Button variant="outline" size="sm" onClick={() => setIsCategoryDialogOpen(true)}>
                 <Tags className="h-4 w-4 mr-2" />
                 Categorias
@@ -1664,6 +1725,79 @@ export default function ProdutosPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Labels / Barcode Dialog */}
+      <Dialog open={isLabelsOpen} onOpenChange={setIsLabelsOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Etiquetas e Códigos de Barras</DialogTitle>
+            <DialogDescription>
+              Gere os códigos de barras e exporte a planilha para o seu programa de etiquetas.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 pt-1">
+            {/* Passo 1 */}
+            <div className="rounded-xl border p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold">1. Gerar códigos faltantes</p>
+                  <p className="text-xs text-muted-foreground">
+                    {missingBarcodeCount > 0
+                      ? `${missingBarcodeCount} produto(s) sem código de barras.`
+                      : "Todos os produtos já têm código. ✔️"}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={handleGenerateBarcodes}
+                  disabled={isGeneratingBarcodes || missingBarcodeCount === 0}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                >
+                  {isGeneratingBarcodes ? (
+                    <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Barcode className="mr-1.5 h-4 w-4" />
+                  )}
+                  Gerar
+                </Button>
+              </div>
+              <p className="mt-2 text-[10px] text-muted-foreground">
+                Gera um código EAN-13 único para cada produto que ainda não tem (o mesmo que o PDV
+                vai ler depois no leitor).
+              </p>
+            </div>
+
+            {/* Passo 2 */}
+            <div className="rounded-xl border p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold">2. Exportar planilha</p>
+                  <p className="text-xs text-muted-foreground">
+                    {sellableProducts.filter((p) => p.barcode).length} produto(s) prontos para
+                    etiqueta.
+                  </p>
+                </div>
+                <Button size="sm" variant="outline" onClick={handleExportLabels}>
+                  <Download className="mr-1.5 h-4 w-4" />
+                  Exportar CSV
+                </Button>
+              </div>
+              <p className="mt-2 text-[10px] text-muted-foreground">
+                Gera um arquivo com as colunas <b>Nome</b>, <b>CodigoBarras</b> e <b>Preco</b>. No
+                seu programa de etiquetas, importe esse arquivo e ligue cada coluna ao campo
+                correspondente (texto, código de barras e preço).
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="pt-2">
+            <Button variant="outline" onClick={() => setIsLabelsOpen(false)} className="w-full">
+              Fechar
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
