@@ -74,6 +74,8 @@ export default function ProdutosPage() {
   const [isProductDialogOpen, setIsProductDialogOpen] = useState(false);
   const [isLabelsOpen, setIsLabelsOpen] = useState(false);
   const [isGeneratingBarcodes, setIsGeneratingBarcodes] = useState(false);
+  const [isGeneratingFormBarcode, setIsGeneratingFormBarcode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [productForm, setProductForm] = useState({
     name: "",
@@ -803,16 +805,80 @@ export default function ProdutosPage() {
   const sellableProducts = products.filter(
     (p) => !products.some((c) => c.parent_id === p.id)
   );
-  const missingBarcodeCount = sellableProducts.filter(
+
+  // Expande a seleção (linhas são produtos de topo): pais viram suas variações
+  const expandSelection = (ids: Set<string>): Product[] => {
+    const out: Product[] = [];
+    ids.forEach((id) => {
+      const children = products.filter((p) => p.parent_id === id);
+      if (children.length > 0) {
+        out.push(...children);
+      } else {
+        const p = products.find((x) => x.id === id);
+        if (p) out.push(p);
+      }
+    });
+    return out;
+  };
+
+  // Escopo das etiquetas: seleção (se houver) ou todos os vendáveis
+  const labelScope =
+    selectedIds.size > 0 ? expandSelection(selectedIds) : sellableProducts;
+  const missingBarcodeCount = labelScope.filter(
     (p) => !p.barcode || p.barcode.trim() === ""
   ).length;
+  const readyForLabelCount = labelScope.filter(
+    (p) => p.barcode && p.barcode.trim() !== ""
+  ).length;
+
+  async function handleGenerateFormBarcode() {
+    setIsGeneratingFormBarcode(true);
+    try {
+      const { data, error } = await supabase.rpc("next_barcode");
+      if (error) throw error;
+      if (data) setProductForm((f) => ({ ...f, barcode: data as string }));
+    } catch (error: any) {
+      console.error(error);
+      toast.error("Erro ao gerar código", { description: error.message });
+    } finally {
+      setIsGeneratingFormBarcode(false);
+    }
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelectedIds((prev) => {
+      const allSelected = filteredProducts.every((p) => prev.has(p.id));
+      if (allSelected) return new Set();
+      return new Set(filteredProducts.map((p) => p.id));
+    });
+  }
 
   async function handleGenerateBarcodes() {
     setIsGeneratingBarcodes(true);
     try {
-      const { data, error } = await supabase.rpc("generate_missing_barcodes");
-      if (error) throw error;
-      toast.success(`${data ?? 0} código(s) de barras gerado(s).`);
+      let count: number | null = null;
+      if (selectedIds.size > 0) {
+        const ids = labelScope
+          .filter((p) => !p.barcode || p.barcode.trim() === "")
+          .map((p) => p.id);
+        const { data, error } = await supabase.rpc("generate_barcodes_for", { p_ids: ids });
+        if (error) throw error;
+        count = data;
+      } else {
+        const { data, error } = await supabase.rpc("generate_missing_barcodes");
+        if (error) throw error;
+        count = data;
+      }
+      toast.success(`${count ?? 0} código(s) de barras gerado(s).`);
       await fetchData();
     } catch (error: any) {
       console.error(error);
@@ -823,7 +889,7 @@ export default function ProdutosPage() {
   }
 
   function handleExportLabels() {
-    const rows = sellableProducts.filter((p) => p.barcode && p.barcode.trim() !== "");
+    const rows = labelScope.filter((p) => p.barcode && p.barcode.trim() !== "");
     if (rows.length === 0) {
       toast.error("Nenhum produto com código de barras para exportar.");
       return;
@@ -954,6 +1020,28 @@ export default function ProdutosPage() {
         </div>
       </div>
 
+      {/* Barra de seleção */}
+      {isAdmin && selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-indigo-500/30 bg-indigo-500/5 px-4 py-2.5">
+          <span className="text-sm font-semibold text-indigo-700 dark:text-indigo-300">
+            {selectedIds.size} produto(s) selecionado(s)
+          </span>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={() => setIsLabelsOpen(true)}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+            >
+              <Barcode className="mr-1.5 h-4 w-4" />
+              Etiquetas
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
+              Limpar seleção
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Search & Filters */}
       <Card className="border shadow-sm">
         <CardContent className="p-4 flex flex-col gap-4 md:flex-row md:items-center">
@@ -1005,6 +1093,20 @@ export default function ProdutosPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  {isAdmin && (
+                    <TableHead className="w-10">
+                      <input
+                        type="checkbox"
+                        aria-label="Selecionar todos"
+                        checked={
+                          filteredProducts.length > 0 &&
+                          filteredProducts.every((p) => selectedIds.has(p.id))
+                        }
+                        onChange={toggleSelectAll}
+                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                    </TableHead>
+                  )}
                   <TableHead className="w-[220px]">Produto</TableHead>
                   <TableHead>SKU / Cód. Barras</TableHead>
                   <TableHead>Categoria</TableHead>
@@ -1051,6 +1153,17 @@ export default function ProdutosPage() {
 
                   return (
                     <TableRow key={prod.id} className="hover:bg-muted/30">
+                      {isAdmin && (
+                        <TableCell className="w-10">
+                          <input
+                            type="checkbox"
+                            aria-label={`Selecionar ${prod.name}`}
+                            checked={selectedIds.has(prod.id)}
+                            onChange={() => toggleSelect(prod.id)}
+                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                          />
+                        </TableCell>
+                      )}
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-3">
                           <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md border bg-muted/30">
@@ -1213,6 +1326,15 @@ export default function ProdutosPage() {
 
               return (
                 <div key={prod.id} className="flex items-center gap-3 p-3">
+                  {isAdmin && (
+                    <input
+                      type="checkbox"
+                      aria-label={`Selecionar ${prod.name}`}
+                      checked={selectedIds.has(prod.id)}
+                      onChange={() => toggleSelect(prod.id)}
+                      className="h-5 w-5 shrink-0 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                  )}
                   <button
                     onClick={() => isAdmin && handleEditProduct(prod)}
                     disabled={!isAdmin}
@@ -1421,12 +1543,29 @@ export default function ProdutosPage() {
 
                   <div className="space-y-1.5">
                     <Label htmlFor="barcode">Código de Barras</Label>
-                    <Input
-                      id="barcode"
-                      placeholder="EAN-13"
-                      value={productForm.barcode}
-                      onChange={(e) => setProductForm({ ...productForm, barcode: e.target.value })}
-                    />
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="barcode"
+                        placeholder="EAN-13"
+                        value={productForm.barcode}
+                        onChange={(e) => setProductForm({ ...productForm, barcode: e.target.value })}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        onClick={handleGenerateFormBarcode}
+                        disabled={isGeneratingFormBarcode}
+                        title="Gerar código automático"
+                        className="shrink-0"
+                      >
+                        {isGeneratingFormBarcode ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Barcode className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </div>
                   </div>
                 </>
               )}
@@ -1739,6 +1878,19 @@ export default function ProdutosPage() {
           </DialogHeader>
 
           <div className="space-y-4 pt-1">
+            {/* Escopo */}
+            <div
+              className={`rounded-lg border p-2.5 text-xs ${
+                selectedIds.size > 0
+                  ? "border-indigo-500/30 bg-indigo-500/5 text-indigo-700 dark:text-indigo-300"
+                  : "bg-muted/30 text-muted-foreground"
+              }`}
+            >
+              {selectedIds.size > 0
+                ? `Aplicando a ${selectedIds.size} produto(s) selecionado(s).`
+                : "Aplicando a todos os produtos."}
+            </div>
+
             {/* Passo 1 */}
             <div className="rounded-xl border p-3">
               <div className="flex items-center justify-between gap-2">
@@ -1747,7 +1899,7 @@ export default function ProdutosPage() {
                   <p className="text-xs text-muted-foreground">
                     {missingBarcodeCount > 0
                       ? `${missingBarcodeCount} produto(s) sem código de barras.`
-                      : "Todos os produtos já têm código. ✔️"}
+                      : "Todos já têm código. ✔️"}
                   </p>
                 </div>
                 <Button
@@ -1776,8 +1928,7 @@ export default function ProdutosPage() {
                 <div>
                   <p className="text-sm font-semibold">2. Exportar planilha</p>
                   <p className="text-xs text-muted-foreground">
-                    {sellableProducts.filter((p) => p.barcode).length} produto(s) prontos para
-                    etiqueta.
+                    {readyForLabelCount} produto(s) prontos para etiqueta.
                   </p>
                 </div>
                 <Button size="sm" variant="outline" onClick={handleExportLabels}>
