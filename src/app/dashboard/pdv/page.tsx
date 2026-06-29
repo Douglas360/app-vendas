@@ -49,7 +49,9 @@ import {
   Users,
   Clock,
   Save,
+  ScanLine,
 } from "lucide-react";
+import { BarcodeScanner } from "@/components/pdv/barcode-scanner";
 import { toast } from "sonner";
 import {
   printReceipt,
@@ -131,6 +133,9 @@ export default function PDVPage() {
   // Fluxo guiado no celular (1=Cliente, 2=Produtos, 3=Pagamento, 4=Revisar)
   const [mobileStep, setMobileStep] = useState(1);
   const [mobileCustomerSearch, setMobileCustomerSearch] = useState("");
+
+  // Leitor de código de barras por câmera
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
 
   // Vendas em aberto (comandas)
   const [openSaleId, setOpenSaleId] = useState<string | null>(null);
@@ -362,33 +367,31 @@ export default function PDVPage() {
     setCart((prevCart) => prevCart.filter((item) => item.id !== productId));
   };
 
-  // Barcode search / scan simulation
+  // Busca um produto por código de barras/SKU e adiciona ao carrinho
+  const findAndAddByCode = useCallback(
+    (raw: string): boolean => {
+      const code = raw.trim();
+      if (!code) return false;
+      const matched = products.find((p) => p.barcode === code || p.sku === code);
+      if (matched) {
+        addToCart(matched);
+        toast.success(`${matched.name} adicionado ao carrinho!`);
+        return true;
+      }
+      toast.error("Produto não encontrado pelo código de barras/SKU.", {
+        description: code,
+      });
+      return false;
+    },
+    // addToCart é estável o suficiente; products muda com o catálogo
+    [products] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  // Barcode search (campo de digitação / leitor USB)
   const handleBarcodeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!barcodeInput.trim()) return;
-
-    const matched = products.find(
-      (p) => p.barcode === barcodeInput.trim() || p.sku === barcodeInput.trim()
-    );
-
-    if (matched) {
-      addToCart(matched);
-      toast.success(`${matched.name} adicionado ao carrinho!`);
-      // Simulate POS beep sound
-      try {
-        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.frequency.setValueAtTime(880, audioCtx.currentTime); // A5 note
-        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.1);
-      } catch (err) {}
-    } else {
-      toast.error("Produto não encontrado pelo código de barras/SKU.");
-    }
+    findAndAddByCode(barcodeInput);
     setBarcodeInput("");
   };
 
@@ -965,14 +968,25 @@ export default function PDVPage() {
                   </span>
                 </div>
 
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    placeholder="Buscar produto..."
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className="h-11 pl-9"
-                  />
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Buscar produto..."
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      className="h-11 pl-9"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsScannerOpen(true)}
+                    title="Ler com a câmera"
+                    className="h-11 px-3"
+                  >
+                    <ScanLine className="h-5 w-5" />
+                  </Button>
                 </div>
 
                 <div className="flex gap-2 overflow-x-auto pb-1">
@@ -1531,16 +1545,28 @@ export default function PDVPage() {
 
         {/* Search Barcode & Name */}
         <div className="grid gap-3 sm:grid-cols-3">
-          <form onSubmit={handleBarcodeSubmit} className="relative sm:col-span-1">
-            <Barcode className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              ref={barcodeInputRef}
-              placeholder="Bipar Código / SKU..."
-              value={barcodeInput}
-              onChange={(e) => setBarcodeInput(e.target.value)}
-              className="pl-9 font-mono"
-            />
-          </form>
+          <div className="flex gap-2 sm:col-span-1">
+            <form onSubmit={handleBarcodeSubmit} className="relative flex-1">
+              <Barcode className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                ref={barcodeInputRef}
+                placeholder="Bipar Código / SKU..."
+                value={barcodeInput}
+                onChange={(e) => setBarcodeInput(e.target.value)}
+                className="pl-9 font-mono"
+              />
+            </form>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={() => setIsScannerOpen(true)}
+              title="Ler com a câmera"
+              className="shrink-0"
+            >
+              <ScanLine className="h-4 w-4" />
+            </Button>
+          </div>
 
           <div className="relative sm:col-span-2">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -1870,6 +1896,13 @@ export default function PDVPage() {
       </Card>
       </div>
       {/* ===================== DIÁLOGOS (compartilhados) ===================== */}
+
+      {/* Leitor de código de barras por câmera */}
+      <BarcodeScanner
+        open={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onDetected={findAndAddByCode}
+      />
 
       {/* Vendas em aberto (comandas) */}
       <Dialog open={isOpenSalesDialogOpen} onOpenChange={setIsOpenSalesDialogOpen}>
