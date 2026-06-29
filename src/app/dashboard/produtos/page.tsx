@@ -57,6 +57,27 @@ const PRODUCT_IMAGES_BUCKET = "product-images";
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
 const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
+// Carrega a biblioteca SheetJS (XLSX) via CDN, uma única vez
+function loadXLSX(): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const w = window as any;
+    if (w.XLSX) return resolve(w.XLSX);
+    const existing = document.getElementById("xlsx-lib") as HTMLScriptElement | null;
+    if (existing) {
+      existing.addEventListener("load", () => resolve(w.XLSX));
+      existing.addEventListener("error", () => reject(new Error("Falha ao carregar a planilha.")));
+      return;
+    }
+    const s = document.createElement("script");
+    s.id = "xlsx-lib";
+    s.src = "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js";
+    s.async = true;
+    s.onload = () => resolve(w.XLSX);
+    s.onerror = () => reject(new Error("Falha ao carregar a planilha."));
+    document.head.appendChild(s);
+  });
+}
+
 export default function ProdutosPage() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin";
@@ -912,33 +933,40 @@ export default function ProdutosPage() {
     }
   }
 
-  function handleExportLabels() {
+  async function handleExportLabels() {
     const rows = labelScope.filter((p) => p.barcode && p.barcode.trim() !== "");
     if (rows.length === 0) {
       toast.error("Nenhum produto com código de barras para exportar.");
       return;
     }
-    const esc = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
-    const header = ["Nome", "CodigoBarras", "Preco"].join(";");
-    const lines = rows.map((p) =>
-      [
-        esc(p.name),
-        esc(p.barcode || ""),
-        esc(`R$ ${p.sale_price.toFixed(2).replace(".", ",")}`),
-      ].join(";")
-    );
-    // BOM para o Excel ler acentos corretamente
-    const csv = "﻿" + [header, ...lines].join("\r\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `etiquetas-produtos-${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    toast.success(`Planilha exportada (${rows.length} produtos).`);
+    try {
+      const XLSX = await loadXLSX();
+      const aoa = [
+        ["Nome", "CodigoBarras", "Preco"],
+        ...rows.map((p) => [
+          p.name,
+          String(p.barcode), // string => preserva zeros à esquerda
+          `R$ ${p.sale_price.toFixed(2).replace(".", ",")}`,
+        ]),
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      // Força a coluna B (CodigoBarras) como TEXTO (mantém 000130)
+      rows.forEach((_, i) => {
+        const ref = `B${i + 2}`;
+        if (ws[ref]) {
+          ws[ref].t = "s";
+          ws[ref].z = "@";
+        }
+      });
+      ws["!cols"] = [{ wch: 28 }, { wch: 16 }, { wch: 12 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Etiquetas");
+      XLSX.writeFile(wb, `etiquetas-produtos-${new Date().toISOString().slice(0, 10)}.xlsx`);
+      toast.success(`Planilha exportada (${rows.length} produtos).`);
+    } catch (error: any) {
+      console.error(error);
+      toast.error("Erro ao exportar a planilha", { description: error.message });
+    }
   }
 
   // Delete Product
@@ -1968,7 +1996,7 @@ export default function ProdutosPage() {
                 </div>
                 <Button size="sm" variant="outline" onClick={handleExportLabels}>
                   <Download className="mr-1.5 h-4 w-4" />
-                  Exportar CSV
+                  Exportar Excel
                 </Button>
               </div>
               <p className="mt-2 text-[10px] text-muted-foreground">
