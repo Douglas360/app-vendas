@@ -888,6 +888,30 @@ export default function ProdutosPage() {
     }
   }
 
+  async function handleRegenerateBarcodes() {
+    const scopeLabel =
+      selectedIds.size > 0 ? `${selectedIds.size} produto(s) selecionado(s)` : "TODOS os produtos";
+    if (
+      !confirm(
+        `Substituir os códigos de barras de ${scopeLabel} por códigos curtos? Etiquetas já impressas com os códigos antigos deixarão de funcionar.`
+      )
+    )
+      return;
+    setIsGeneratingBarcodes(true);
+    try {
+      const ids = selectedIds.size > 0 ? labelScope.map((p) => p.id) : null;
+      const { data, error } = await supabase.rpc("regenerate_barcodes_for", { p_ids: ids });
+      if (error) throw error;
+      toast.success(`${data ?? 0} código(s) regerado(s).`);
+      await fetchData();
+    } catch (error: any) {
+      console.error(error);
+      toast.error("Erro ao regerar códigos", { description: error.message });
+    } finally {
+      setIsGeneratingBarcodes(false);
+    }
+  }
+
   function handleExportLabels() {
     const rows = labelScope.filter((p) => p.barcode && p.barcode.trim() !== "");
     if (rows.length === 0) {
@@ -1546,7 +1570,7 @@ export default function ProdutosPage() {
                     <div className="flex items-center gap-2">
                       <Input
                         id="barcode"
-                        placeholder="EAN-13"
+                        placeholder="Código de barras"
                         value={productForm.barcode}
                         onChange={(e) => setProductForm({ ...productForm, barcode: e.target.value })}
                       />
@@ -1917,8 +1941,19 @@ export default function ProdutosPage() {
                 </Button>
               </div>
               <p className="mt-2 text-[10px] text-muted-foreground">
-                Gera um código EAN-13 único para cada produto que ainda não tem (o mesmo que o PDV
-                vai ler depois no leitor).
+                Gera um código curto de 6 dígitos (Code 128) para cada produto sem código — fica
+                compacto e fácil de ler na etiqueta. É o mesmo código que o PDV lê depois.
+              </p>
+              <button
+                onClick={handleRegenerateBarcodes}
+                disabled={isGeneratingBarcodes}
+                className="mt-2 text-[11px] font-medium text-rose-600 hover:underline disabled:opacity-50"
+              >
+                Regerar (substituir) os códigos {selectedIds.size > 0 ? "selecionados" : "de todos"} →
+              </button>
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                Use para trocar códigos antigos (longos) pelos curtos. Atenção: etiquetas já
+                impressas com os códigos antigos param de funcionar.
               </p>
             </div>
 
