@@ -49,7 +49,12 @@ import {
   Copy,
   Barcode,
   Download,
+  Megaphone,
+  Share2,
 } from "lucide-react";
+import { getStoreInfo } from "@/lib/receipt";
+import { generateStoryBlob, slugify } from "@/lib/story";
+import { postStatusToWhatsapp } from "@/lib/whatsapp";
 import Image from "next/image";
 import { toast } from "sonner";
 
@@ -97,6 +102,14 @@ export default function ProdutosPage() {
   const [isGeneratingBarcodes, setIsGeneratingBarcodes] = useState(false);
   const [isGeneratingFormBarcode, setIsGeneratingFormBarcode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Artes de divulgação (Story)
+  const [isStoriesOpen, setIsStoriesOpen] = useState(false);
+  const [isGeneratingStories, setIsGeneratingStories] = useState(false);
+  const [postingStatusId, setPostingStatusId] = useState<string | null>(null);
+  const [stories, setStories] = useState<
+    { id: string; name: string; caption: string; url: string; blob: Blob }[]
+  >([]);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [productForm, setProductForm] = useState({
     name: "",
@@ -969,6 +982,116 @@ export default function ProdutosPage() {
     }
   }
 
+  // ---- Artes de divulgação (Story) ----
+  async function handleOpenStories() {
+    const scope = (selectedIds.size > 0 ? labelScope : sellableProducts).slice(0, 20);
+    if (scope.length === 0) {
+      toast.error("Selecione ao menos um produto.");
+      return;
+    }
+    setIsGeneratingStories(true);
+    // limpa artes anteriores
+    stories.forEach((s) => URL.revokeObjectURL(s.url));
+    setStories([]);
+    setIsStoriesOpen(true);
+    try {
+      const store = getStoreInfo();
+      const result: { id: string; name: string; caption: string; url: string; blob: Blob }[] = [];
+      for (const p of scope) {
+        const priceText = `R$ ${p.sale_price.toFixed(2).replace(".", ",")}`;
+        const blob = await generateStoryBlob({
+          storeName: store.name,
+          phone: store.phone,
+          productName: p.name,
+          priceText,
+          imageUrl: p.image_url,
+        });
+        result.push({
+          id: p.id,
+          name: p.name,
+          caption: `${p.name} — ${priceText}`,
+          url: URL.createObjectURL(blob),
+          blob,
+        });
+      }
+      setStories(result);
+    } catch (error: any) {
+      console.error(error);
+      toast.error("Erro ao gerar as artes", { description: error.message });
+    } finally {
+      setIsGeneratingStories(false);
+    }
+  }
+
+  function closeStories() {
+    stories.forEach((s) => URL.revokeObjectURL(s.url));
+    setStories([]);
+    setIsStoriesOpen(false);
+  }
+
+  async function shareStory(s: { name: string; blob: Blob }) {
+    const file = new File([s.blob], `${slugify(s.name) || "produto"}.jpg`, {
+      type: "image/jpeg",
+    });
+    const nav = navigator as any;
+    if (nav.canShare && nav.canShare({ files: [file] })) {
+      try {
+        await nav.share({ files: [file], title: s.name });
+      } catch {
+        // usuário cancelou — ok
+      }
+    } else {
+      downloadStory(s);
+      toast.info("Compartilhamento direto não suportado aqui; imagem baixada.");
+    }
+  }
+
+  function downloadStory(s: { name: string; url?: string; blob: Blob }) {
+    const url = s.url || URL.createObjectURL(s.blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `story-${slugify(s.name) || "produto"}.jpg`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+
+  function blobToBase64(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const res = reader.result as string; // data:image/jpeg;base64,XXXX
+        resolve(res.includes(",") ? res.split(",")[1] : res);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function handlePostStatus(s: {
+    id: string;
+    caption: string;
+    blob: Blob;
+  }) {
+    setPostingStatusId(s.id);
+    try {
+      const b64 = await blobToBase64(s.blob);
+      const sent = await postStatusToWhatsapp(supabase, b64, s.caption);
+      if (sent) {
+        toast.success("Postado no Status do WhatsApp!");
+      } else {
+        toast.error("WhatsApp não conectado.", {
+          description: "Conecte em Configurações para postar no Status.",
+        });
+      }
+    } catch (error: any) {
+      console.error(error);
+      toast.error("Falha ao postar no Status", { description: error.message });
+    } finally {
+      setPostingStatusId(null);
+    }
+  }
+
   // Delete Product
   async function handleDeleteProduct(id: string) {
     if (!isAdmin) return;
@@ -1059,6 +1182,10 @@ export default function ProdutosPage() {
                 <Barcode className="h-4 w-4 mr-2" />
                 Etiquetas
               </Button>
+              <Button variant="outline" size="sm" onClick={handleOpenStories}>
+                <Megaphone className="h-4 w-4 mr-2" />
+                Divulgar
+              </Button>
               <Button variant="outline" size="sm" onClick={() => setIsCategoryDialogOpen(true)}>
                 <Tags className="h-4 w-4 mr-2" />
                 Categorias
@@ -1079,6 +1206,14 @@ export default function ProdutosPage() {
             {selectedIds.size} produto(s) selecionado(s)
           </span>
           <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={handleOpenStories}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              <Megaphone className="mr-1.5 h-4 w-4" />
+              Divulgar
+            </Button>
             <Button
               size="sm"
               onClick={() => setIsLabelsOpen(true)}
@@ -1916,6 +2051,84 @@ export default function ProdutosPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Divulgação / Story Dialog */}
+      <Dialog open={isStoriesOpen} onOpenChange={(o) => !o && closeStories()}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Artes para divulgação (Story)</DialogTitle>
+            <DialogDescription>
+              Imagem pronta no formato Story. Toque em Compartilhar para postar no Status do
+              WhatsApp (no celular) ou baixe a imagem.
+            </DialogDescription>
+          </DialogHeader>
+
+          {isGeneratingStories ? (
+            <div className="flex h-60 flex-col items-center justify-center gap-2">
+              <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
+              <p className="text-sm text-muted-foreground">Gerando as artes...</p>
+            </div>
+          ) : stories.length === 0 ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">
+              Nenhuma arte gerada.
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+              {stories.map((s) => (
+                <div key={s.id} className="space-y-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={s.url}
+                    alt={s.name}
+                    className="w-full rounded-lg border shadow-sm"
+                  />
+                  <div className="space-y-1.5">
+                    <Button
+                      size="sm"
+                      onClick={() => handlePostStatus(s)}
+                      disabled={postingStatusId === s.id}
+                      className="h-8 w-full bg-emerald-600 px-2 text-xs text-white hover:bg-emerald-700"
+                    >
+                      {postingStatusId === s.id ? (
+                        <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Megaphone className="mr-1 h-3.5 w-3.5" />
+                      )}
+                      Postar no Status
+                    </Button>
+                    <div className="flex gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => shareStory(s)}
+                        className="h-8 flex-1 px-2 text-xs"
+                      >
+                        <Share2 className="mr-1 h-3.5 w-3.5" />
+                        Compartilhar
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="outline"
+                        onClick={() => downloadStory(s)}
+                        title="Baixar"
+                        className="h-8 w-8 shrink-0"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <DialogFooter className="pt-2">
+            <Button variant="outline" onClick={closeStories} className="w-full">
+              Fechar
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

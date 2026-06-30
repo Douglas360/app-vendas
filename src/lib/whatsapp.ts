@@ -229,6 +229,30 @@ export function buildWhatsappReceipt(data: ReceiptData): string {
   return lines.join("\n");
 }
 
+// Posta uma imagem no Status (Stories) do WhatsApp conectado.
+// base64Image: conteúdo da imagem em base64 (sem o prefixo data:).
+// Retorna true se enviou; false se não está configurado/conectado.
+export async function postStatusToWhatsapp(
+  supabase: SupabaseClient,
+  base64Image: string,
+  caption: string
+): Promise<boolean> {
+  const settings = await fetchEvolutionSettings(supabase);
+  if (!isConfigured(settings) || !settings.connected) return false;
+  await evoFetch(
+    settings,
+    `/message/sendStatus/${encodeURIComponent(settings.instance)}`,
+    "POST",
+    {
+      type: "image",
+      content: base64Image,
+      caption: caption || "",
+      allContacts: true,
+    }
+  );
+  return true;
+}
+
 // Envia uma mensagem de texto ao cliente, se o WhatsApp estiver conectado.
 // Retorna true se enviou; false se não está configurado/conectado.
 export async function sendCustomerMessage(
