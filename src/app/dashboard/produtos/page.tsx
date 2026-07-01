@@ -51,10 +51,12 @@ import {
   Download,
   Megaphone,
   Share2,
+  Wand2,
+  Undo2,
 } from "lucide-react";
 import { getStoreInfo } from "@/lib/receipt";
 import { generateStoryBlob, slugify } from "@/lib/story";
-import { postStatusToWhatsapp } from "@/lib/whatsapp";
+import { postStatusToWhatsapp, fetchEvolutionSettings } from "@/lib/whatsapp";
 import Image from "next/image";
 import { toast } from "sonner";
 
@@ -107,6 +109,7 @@ export default function ProdutosPage() {
   const [isStoriesOpen, setIsStoriesOpen] = useState(false);
   const [isGeneratingStories, setIsGeneratingStories] = useState(false);
   const [postingStatusId, setPostingStatusId] = useState<string | null>(null);
+  const [isPostingAll, setIsPostingAll] = useState(false);
   const [stories, setStories] = useState<
     { id: string; name: string; caption: string; url: string; blob: Blob }[]
   >([]);
@@ -126,6 +129,12 @@ export default function ProdutosPage() {
   });
   const [isSavingProduct, setIsSavingProduct] = useState(false);
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
+  const [isStylizing, setIsStylizing] = useState(false);
+  const [stylizeBackup, setStylizeBackup] = useState<{
+    file: File | null;
+    preview: string | null;
+    removed: boolean;
+  } | null>(null);
 
   // Variations State
   const [hasVariations, setHasVariations] = useState(false);
@@ -352,6 +361,136 @@ export default function ProdutosPage() {
     } finally {
       setIsGeneratingAI(false);
     }
+  }
+
+  // Converte base64 (retornado pela IA) em um File pronto para upload
+  function base64ToFile(b64: string, mime: string): File {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const ext = mime.includes("png")
+      ? "png"
+      : mime.includes("webp")
+      ? "webp"
+      : "jpg";
+    return new File([bytes], `premium-${crypto.randomUUID()}.${ext}`, {
+      type: mime,
+    });
+  }
+
+  // Gera uma versão profissional (estúdio) da imagem do produto com a IA (Gemini)
+  async function handleStylizeImage() {
+    const apiKey = localStorage.getItem("app_vendas_gemini_key");
+    if (!apiKey) {
+      toast.error("Configuração de IA Ausente", {
+        description: "Configure a Chave de API do Gemini em 'Configurações' do sistema.",
+      });
+      return;
+    }
+    if (!imagePreview) {
+      toast.error("Imagem Necessária", {
+        description: "Envie uma imagem do produto primeiro para estilizar.",
+      });
+      return;
+    }
+
+    setIsStylizing(true);
+    const toastId = toast.loading("IA criando imagem premium...");
+    try {
+      let base64Data = "";
+      let mimeType = "";
+      if (imageFile) {
+        base64Data = await fileToBase64(imageFile);
+        mimeType = imageFile.type;
+      } else if (currentImageUrl) {
+        const res = await urlToBase64(currentImageUrl);
+        base64Data = res.data;
+        mimeType = res.mimeType;
+      } else {
+        throw new Error("Nenhuma imagem disponível para estilizar.");
+      }
+
+      const prompt =
+        "Você é um fotógrafo profissional de produtos para e-commerce. " +
+        "Recrie ESTE MESMO produto como uma foto premium de catálogo, em fundo de estúdio limpo e neutro (branco ou cinza-claro suave), " +
+        "com iluminação de estúdio difusa, sombra natural sutil e leve reflexo no piso. " +
+        "Mantenha EXATAMENTE o produto original: mesma forma, cor, estampa, logotipos, textura, detalhes e proporções — " +
+        "não invente elementos, não troque o modelo, não altere as cores. " +
+        "Enquadramento centralizado, produto em destaque, nítido, alta resolução e aparência sofisticada, digna de post no WhatsApp. " +
+        "Sem texto, sem marca d'água e sem pessoas. Retorne apenas a imagem.";
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  { text: prompt },
+                  { inlineData: { mimeType, data: base64Data } },
+                ],
+              },
+            ],
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(
+          errData.error?.message || "Erro na chamada da API do Gemini."
+        );
+      }
+
+      const data = await response.json();
+      const parts: any[] = data.candidates?.[0]?.content?.parts || [];
+      const imgPart = parts.find((p) => p.inlineData?.data);
+      if (!imgPart) {
+        throw new Error(
+          "A IA não retornou uma imagem. Tente com outra foto (fundo mais simples ajuda)."
+        );
+      }
+
+      const outMime = imgPart.inlineData.mimeType || "image/png";
+      const outFile = base64ToFile(imgPart.inlineData.data, outMime);
+
+      // Guarda o estado atual para permitir "Desfazer"
+      setStylizeBackup({
+        file: imageFile,
+        preview: imagePreview,
+        removed: imageRemoved,
+      });
+      setImageFile(outFile);
+      setImagePreview(URL.createObjectURL(outFile));
+      setImageRemoved(false);
+
+      toast.dismiss(toastId);
+      toast.success("Imagem premium gerada!", {
+        description: "Revise e salve o produto para aplicar. Use 'Desfazer' se preferir a original.",
+      });
+    } catch (error: any) {
+      console.error(error);
+      toast.dismiss(toastId);
+      toast.error("Erro ao estilizar imagem", {
+        description: error.message || "Tente novamente ou verifique sua API Key.",
+      });
+    } finally {
+      setIsStylizing(false);
+    }
+  }
+
+  // Volta para a imagem anterior à estilização
+  function undoStylize() {
+    if (!stylizeBackup) return;
+    if (imagePreview && imagePreview.startsWith("blob:")) {
+      URL.revokeObjectURL(imagePreview);
+    }
+    setImageFile(stylizeBackup.file);
+    setImagePreview(stylizeBackup.preview);
+    setImageRemoved(stylizeBackup.removed);
+    setStylizeBackup(null);
   }
 
   // Image State
@@ -621,6 +760,7 @@ export default function ProdutosPage() {
     setImagePreview(existingUrl);
     setCurrentImageUrl(existingUrl);
     setImageRemoved(false);
+    setStylizeBackup(null);
   }
 
   function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -647,6 +787,7 @@ export default function ProdutosPage() {
     setImageFile(file);
     setImagePreview(URL.createObjectURL(file));
     setImageRemoved(false);
+    setStylizeBackup(null);
   }
 
   function handleRemoveImage() {
@@ -656,6 +797,7 @@ export default function ProdutosPage() {
     setImageFile(null);
     setImagePreview(null);
     setImageRemoved(true);
+    setStylizeBackup(null);
   }
 
   // Faz upload do arquivo e retorna a URL pública
@@ -1056,15 +1198,14 @@ export default function ProdutosPage() {
     document.body.removeChild(a);
   }
 
-  async function handlePostStatus(s: {
-    id: string;
+  // Sobe a arte no bucket, posta no Status e agenda a limpeza do arquivo.
+  // Retorna true se enviou; false se o WhatsApp não está conectado.
+  async function postStoryToStatus(s: {
     caption: string;
     blob: Blob;
-  }) {
-    setPostingStatusId(s.id);
+  }): Promise<boolean> {
     let uploadedPath: string | null = null;
     try {
-      // Sobe a arte no bucket público e envia a URL para a Evolution
       const path = `stories/${crypto.randomUUID()}.jpg`;
       const { error: upErr } = await supabase.storage
         .from(PRODUCT_IMAGES_BUCKET)
@@ -1076,7 +1217,35 @@ export default function ProdutosPage() {
         .from(PRODUCT_IMAGES_BUCKET)
         .getPublicUrl(path);
 
-      const sent = await postStatusToWhatsapp(supabase, urlData.publicUrl, s.caption);
+      return await postStatusToWhatsapp(supabase, urlData.publicUrl, s.caption);
+    } finally {
+      // Remove a arte do bucket bem depois (a Evolution baixa durante o envio).
+      if (uploadedPath) {
+        const p = uploadedPath;
+        setTimeout(() => {
+          supabase.storage.from(PRODUCT_IMAGES_BUCKET).remove([p]).catch(() => {});
+        }, 120000);
+      }
+    }
+  }
+
+  async function handlePostStatus(s: {
+    id: string;
+    caption: string;
+    blob: Blob;
+  }) {
+    setPostingStatusId(s.id);
+    // Libera o botão após ~12s SEM cancelar a requisição (a Evolution pode
+    // demorar para postar em todos os contatos). O envio continua em segundo plano.
+    const softTimer = setTimeout(() => {
+      setPostingStatusId((cur) => (cur === s.id ? null : cur));
+      toast.info("Postando no Status…", {
+        description: "Pode levar alguns segundos para aparecer no WhatsApp.",
+      });
+    }, 12000);
+    try {
+      const sent = await postStoryToStatus(s);
+      clearTimeout(softTimer);
       if (sent) {
         toast.success("Postado no Status do WhatsApp!");
       } else {
@@ -1085,17 +1254,60 @@ export default function ProdutosPage() {
         });
       }
     } catch (error: any) {
+      clearTimeout(softTimer);
       console.error(error);
       toast.error("Falha ao postar no Status", { description: error.message });
     } finally {
-      // Remove a arte do bucket depois (a Evolution já baixou ao postar)
-      if (uploadedPath) {
-        const p = uploadedPath;
-        setTimeout(() => {
-          supabase.storage.from(PRODUCT_IMAGES_BUCKET).remove([p]).catch(() => {});
-        }, 30000);
+      setPostingStatusId((cur) => (cur === s.id ? null : cur));
+    }
+  }
+
+  // Posta TODAS as artes geradas no Status, em sequência e com intervalo,
+  // sem travar a interface (cada envio continua em segundo plano).
+  async function handlePostAllStatus() {
+    if (stories.length === 0 || isPostingAll) return;
+
+    // Confere a conexão uma única vez antes de começar
+    const settings = await fetchEvolutionSettings(supabase);
+    if (
+      !settings.connected ||
+      !settings.baseUrl ||
+      !settings.apiKey ||
+      !settings.instance
+    ) {
+      toast.error("WhatsApp não conectado.", {
+        description: "Conecte em Configurações para postar no Status.",
+      });
+      return;
+    }
+
+    setIsPostingAll(true);
+    const total = stories.length;
+    const toastId = toast.loading(`Postando 1 de ${total}…`);
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    let fail = 0;
+    try {
+      for (let i = 0; i < total; i++) {
+        toast.loading(`Postando ${i + 1} de ${total}…`, { id: toastId });
+        // Dispara o envio (não bloqueia até a resposta lenta da Evolution).
+        postStoryToStatus(stories[i]).catch(() => {
+          fail += 1;
+        });
+        // Espaça os envios para não sobrecarregar a Evolution.
+        if (i < total - 1) await sleep(4000);
       }
-      setPostingStatusId(null);
+      toast.dismiss(toastId);
+      toast.success(`${total} arte(s) enviadas ao Status!`, {
+        description:
+          "Podem levar alguns segundos para aparecer no WhatsApp." +
+          (fail ? ` (${fail} falharam)` : ""),
+      });
+    } catch (error: any) {
+      toast.dismiss(toastId);
+      console.error(error);
+      toast.error("Falha ao postar as artes", { description: error.message });
+    } finally {
+      setIsPostingAll(false);
     }
   }
 
@@ -1685,7 +1897,7 @@ export default function ProdutosPage() {
                         type="button"
                         variant="secondary"
                         size="sm"
-                        disabled={!imagePreview || isGeneratingAI}
+                        disabled={!imagePreview || isGeneratingAI || isStylizing}
                         onClick={handleGenerateProductDetails}
                         className="bg-purple-100 hover:bg-purple-200 text-purple-700 dark:bg-purple-950 dark:hover:bg-purple-900 dark:text-purple-300 font-semibold shadow-sm transition-all"
                       >
@@ -1701,9 +1913,41 @@ export default function ProdutosPage() {
                           </>
                         )}
                       </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={!imagePreview || isStylizing || isGeneratingAI}
+                        onClick={handleStylizeImage}
+                        className="bg-amber-100 hover:bg-amber-200 text-amber-800 dark:bg-amber-950 dark:hover:bg-amber-900 dark:text-amber-300 font-semibold shadow-sm transition-all"
+                      >
+                        {isStylizing ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Estilizando...
+                          </>
+                        ) : (
+                          <>
+                            <Wand2 className="mr-2 h-4 w-4 text-amber-600" />
+                            Estilizar imagem
+                          </>
+                        )}
+                      </Button>
+                      {stylizeBackup && !isStylizing && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={undoStylize}
+                          className="text-muted-foreground"
+                        >
+                          <Undo2 className="mr-2 h-4 w-4" />
+                          Desfazer
+                        </Button>
+                      )}
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      JPG, PNG, WEBP ou GIF. Máx. 5MB. Envie uma imagem para habilitar o preenchimento por IA.
+                      JPG, PNG, WEBP ou GIF. Máx. 5MB. <span className="font-medium">Estilizar imagem</span> gera uma versão premium (fundo de estúdio) da foto para divulgar.
                     </p>
                   </div>
                 </div>
@@ -2082,8 +2326,29 @@ export default function ProdutosPage() {
               Nenhuma arte gerada.
             </p>
           ) : (
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-              {stories.map((s) => (
+            <>
+              <Button
+                onClick={handlePostAllStatus}
+                disabled={isPostingAll || postingStatusId !== null}
+                className="w-full bg-emerald-600 text-white hover:bg-emerald-700"
+              >
+                {isPostingAll ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Postando…
+                  </>
+                ) : (
+                  <>
+                    <Megaphone className="mr-2 h-4 w-4" />
+                    Postar todos no Status ({stories.length})
+                  </>
+                )}
+              </Button>
+              <p className="-mt-1 text-center text-xs text-muted-foreground">
+                Envia todas as artes de uma vez, com um pequeno intervalo entre elas.
+              </p>
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+                {stories.map((s) => (
                 <div key={s.id} className="space-y-2">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
@@ -2095,7 +2360,7 @@ export default function ProdutosPage() {
                     <Button
                       size="sm"
                       onClick={() => handlePostStatus(s)}
-                      disabled={postingStatusId === s.id}
+                      disabled={postingStatusId === s.id || isPostingAll}
                       className="h-8 w-full bg-emerald-600 px-2 text-xs text-white hover:bg-emerald-700"
                     >
                       {postingStatusId === s.id ? (
@@ -2127,8 +2392,9 @@ export default function ProdutosPage() {
                     </div>
                   </div>
                 </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </>
           )}
 
           <DialogFooter className="pt-2">

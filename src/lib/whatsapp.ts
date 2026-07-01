@@ -253,25 +253,20 @@ export async function postStatusToWhatsapp(
 ): Promise<boolean> {
   const settings = await fetchEvolutionSettings(supabase);
   if (!isConfigured(settings) || !settings.connected) return false;
-  try {
-    await evoFetch(
-      settings,
-      `/message/sendStatus/${encodeURIComponent(settings.instance)}`,
-      "POST",
-      {
-        type: "image",
-        content: imageUrl,
-        caption: caption || "",
-        allContacts: true,
-      },
-      15000
-    );
-  } catch (err) {
-    // A Evolution costuma demorar (ou não responder) ao postar em todos os
-    // contatos, mesmo tendo publicado. Nesse caso tratamos como enviado.
-    if ((err as Error).message === "__timeout__") return true;
-    throw err;
-  }
+  // Sem timeout/abort: a Evolution precisa da conexão aberta para baixar a
+  // imagem e publicar. Abortar cancela a postagem. Quem controla o tempo do
+  // botão na interface é a tela (libera o botão sem cortar a requisição).
+  await evoFetch(
+    settings,
+    `/message/sendStatus/${encodeURIComponent(settings.instance)}`,
+    "POST",
+    {
+      type: "image",
+      content: imageUrl,
+      caption: caption || "",
+      allContacts: true,
+    }
+  );
   return true;
 }
 
