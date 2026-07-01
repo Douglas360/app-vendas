@@ -71,17 +71,31 @@ async function evoFetch(
   cfg: EvolutionConfig,
   path: string,
   method: "GET" | "POST" | "DELETE" = "GET",
-  body?: unknown
+  body?: unknown,
+  timeoutMs?: number
 ): Promise<Record<string, unknown>> {
   const url = `${cfg.baseUrl.replace(/\/+$/, "")}${path}`;
-  const res = await fetch(url, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      apikey: cfg.apiKey,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const controller = timeoutMs ? new AbortController() : undefined;
+  const timer = timeoutMs
+    ? setTimeout(() => controller!.abort(), timeoutMs)
+    : undefined;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        apikey: cfg.apiKey,
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller?.signal,
+    });
+  } catch (err) {
+    if (timer) clearTimeout(timer);
+    if ((err as Error)?.name === "AbortError") throw new Error("__timeout__");
+    throw err;
+  }
+  if (timer) clearTimeout(timer);
 
   const text = await res.text();
   let data: Record<string, unknown>;
@@ -239,17 +253,25 @@ export async function postStatusToWhatsapp(
 ): Promise<boolean> {
   const settings = await fetchEvolutionSettings(supabase);
   if (!isConfigured(settings) || !settings.connected) return false;
-  await evoFetch(
-    settings,
-    `/message/sendStatus/${encodeURIComponent(settings.instance)}`,
-    "POST",
-    {
-      type: "image",
-      content: imageUrl,
-      caption: caption || "",
-      allContacts: true,
-    }
-  );
+  try {
+    await evoFetch(
+      settings,
+      `/message/sendStatus/${encodeURIComponent(settings.instance)}`,
+      "POST",
+      {
+        type: "image",
+        content: imageUrl,
+        caption: caption || "",
+        allContacts: true,
+      },
+      15000
+    );
+  } catch (err) {
+    // A Evolution costuma demorar (ou não responder) ao postar em todos os
+    // contatos, mesmo tendo publicado. Nesse caso tratamos como enviado.
+    if ((err as Error).message === "__timeout__") return true;
+    throw err;
+  }
   return true;
 }
 
