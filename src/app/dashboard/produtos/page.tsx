@@ -1056,27 +1056,27 @@ export default function ProdutosPage() {
     document.body.removeChild(a);
   }
 
-  function blobToBase64(blob: Blob): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const res = reader.result as string; // data:image/jpeg;base64,XXXX
-        resolve(res.includes(",") ? res.split(",")[1] : res);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  }
-
   async function handlePostStatus(s: {
     id: string;
     caption: string;
     blob: Blob;
   }) {
     setPostingStatusId(s.id);
+    let uploadedPath: string | null = null;
     try {
-      const b64 = await blobToBase64(s.blob);
-      const sent = await postStatusToWhatsapp(supabase, b64, s.caption);
+      // Sobe a arte no bucket público e envia a URL para a Evolution
+      const path = `stories/${crypto.randomUUID()}.jpg`;
+      const { error: upErr } = await supabase.storage
+        .from(PRODUCT_IMAGES_BUCKET)
+        .upload(path, s.blob, { contentType: "image/jpeg", upsert: false });
+      if (upErr) throw upErr;
+      uploadedPath = path;
+
+      const { data: urlData } = supabase.storage
+        .from(PRODUCT_IMAGES_BUCKET)
+        .getPublicUrl(path);
+
+      const sent = await postStatusToWhatsapp(supabase, urlData.publicUrl, s.caption);
       if (sent) {
         toast.success("Postado no Status do WhatsApp!");
       } else {
@@ -1088,6 +1088,13 @@ export default function ProdutosPage() {
       console.error(error);
       toast.error("Falha ao postar no Status", { description: error.message });
     } finally {
+      // Remove a arte do bucket depois (a Evolution já baixou ao postar)
+      if (uploadedPath) {
+        const p = uploadedPath;
+        setTimeout(() => {
+          supabase.storage.from(PRODUCT_IMAGES_BUCKET).remove([p]).catch(() => {});
+        }, 30000);
+      }
       setPostingStatusId(null);
     }
   }

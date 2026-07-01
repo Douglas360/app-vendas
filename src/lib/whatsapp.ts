@@ -230,11 +230,11 @@ export function buildWhatsappReceipt(data: ReceiptData): string {
 }
 
 // Posta uma imagem no Status (Stories) do WhatsApp conectado.
-// base64Image: conteúdo da imagem em base64 (sem o prefixo data:).
+// imageUrl: URL pública da imagem (a Evolution baixa a imagem desse link).
 // Retorna true se enviou; false se não está configurado/conectado.
 export async function postStatusToWhatsapp(
   supabase: SupabaseClient,
-  base64Image: string,
+  imageUrl: string,
   caption: string
 ): Promise<boolean> {
   const settings = await fetchEvolutionSettings(supabase);
@@ -245,7 +245,7 @@ export async function postStatusToWhatsapp(
     "POST",
     {
       type: "image",
-      content: base64Image,
+      content: imageUrl,
       caption: caption || "",
       allContacts: true,
     }
