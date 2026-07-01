@@ -1151,7 +1151,9 @@ export default function ProdutosPage() {
         result.push({
           id: p.id,
           name: p.name,
-          caption: `${p.name} — ${priceText}`,
+          // Legenda vazia: o preço já aparece grande na própria arte, e a
+          // barra de legenda do WhatsApp ficava por cima do preço.
+          caption: "",
           url: URL.createObjectURL(blob),
           blob,
         });
