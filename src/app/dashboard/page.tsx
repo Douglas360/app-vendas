@@ -25,6 +25,7 @@ import {
   Users,
   TrendingUp,
   DollarSign,
+  Wallet,
   AlertTriangle,
   RefreshCw,
   Clock,
@@ -121,6 +122,7 @@ export default function DashboardPage() {
   // Stats
   const [salesTodayTotal, setSalesTodayTotal] = useState(0);
   const [salesTodayCount, setSalesTodayCount] = useState(0);
+  const [cashTodayTotal, setCashTodayTotal] = useState(0);
   const [productsCount, setProductsCount] = useState(0);
   const [customersCount, setCustomersCount] = useState(0);
   const [fiadoTotal, setFiadoTotal] = useState(0);
@@ -179,6 +181,16 @@ export default function DashboardPage() {
       const salesSum = salesToday?.reduce((acc: number, s: any) => acc + s.total, 0) || 0;
       setSalesTodayTotal(salesSum);
       setSalesTodayCount(salesToday?.length || 0);
+
+      // 1b. Caixa de hoje (entradas reais: à vista + parcelas recebidas)
+      const { data: cashToday, error: cashError } = await supabase
+        .from("cash_movements")
+        .select("amount")
+        .gte("occurred_at", todayStart.toISOString());
+      if (cashError) throw cashError;
+      setCashTodayTotal(
+        cashToday?.reduce((acc: number, m: any) => acc + Number(m.amount), 0) || 0
+      );
 
       // 2. Fetch products count
       const { count: prodCount, error: prodErr } = await supabase
@@ -287,12 +299,19 @@ export default function DashboardPage() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <StatCard
           title="Faturamento Hoje"
           value={`R$ ${salesTodayTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`}
-          description="vendas finalizadas hoje"
+          description="vendas do dia (competência)"
           icon={DollarSign}
+          variant="success"
+        />
+        <StatCard
+          title="Caixa Hoje"
+          value={`R$ ${cashTodayTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`}
+          description="dinheiro que entrou hoje"
+          icon={Wallet}
           variant="success"
         />
         <StatCard

@@ -152,6 +152,17 @@ export default function ClienteDetalhePage() {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [sales, setSales] = useState<Sale[]>([]);
   const [installments, setInstallments] = useState<InstallmentRow[]>([]);
+  const [payments, setPayments] = useState<
+    {
+      id: string;
+      amount: number;
+      method: string | null;
+      kind: "venda" | "parcela";
+      occurred_at: string;
+      notes: string | null;
+      sale: { sale_number: number } | null;
+    }[]
+  >([]);
   const [summary, setSummary] = useState<CustomerDebtSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -202,7 +213,7 @@ export default function ClienteDetalhePage() {
       }
       setCustomer(custData);
 
-      const [salesRes, instRes, summaryRes] = await Promise.all([
+      const [salesRes, instRes, summaryRes, paymentsRes] = await Promise.all([
         supabase
           .from("sales")
           .select(
@@ -221,6 +232,11 @@ export default function ClienteDetalhePage() {
         supabase.rpc("get_customer_debt_summary", {
           p_customer_id: customerId,
         }),
+        supabase
+          .from("cash_movements")
+          .select("id, amount, method, kind, occurred_at, notes, sale:sales(sale_number)")
+          .eq("customer_id", customerId)
+          .order("occurred_at", { ascending: false }),
       ]);
 
       if (salesRes.error) throw salesRes.error;
@@ -229,6 +245,9 @@ export default function ClienteDetalhePage() {
 
       setSales(salesRes.data || []);
       setInstallments((instRes.data as InstallmentRow[]) || []);
+      setPayments(
+        (paymentsRes.data as unknown as typeof payments) || []
+      );
       if (summaryRes.data && summaryRes.data.length > 0) {
         setSummary(summaryRes.data[0] as CustomerDebtSummary);
       }
@@ -825,6 +844,10 @@ export default function ClienteDetalhePage() {
               </Badge>
             )}
           </TabsTrigger>
+          <TabsTrigger value="pagamentos">
+            <Wallet className="mr-1.5 h-4 w-4" />
+            Pagamentos
+          </TabsTrigger>
           <TabsTrigger value="dados">
             <Phone className="mr-1.5 h-4 w-4" />
             Dados
@@ -1161,6 +1184,88 @@ export default function ClienteDetalhePage() {
               )}
             </Card>
           </div>
+        </TabsContent>
+
+        {/* ---- PAGAMENTOS ---- */}
+        <TabsContent value="pagamentos">
+          <Card className="border shadow-sm overflow-hidden">
+            {(() => {
+              const totalReceived = payments.reduce(
+                (s, p) => s + Number(p.amount),
+                0
+              );
+              const methodLabel: Record<string, string> = {
+                dinheiro: "Dinheiro",
+                pix: "PIX",
+                cartao_debito: "Cartão débito",
+                cartao_credito: "Cartão crédito",
+                fiado: "Crediário",
+              };
+              if (payments.length === 0) {
+                return (
+                  <div className="flex h-48 flex-col items-center justify-center gap-2 p-4 text-center">
+                    <Wallet className="h-10 w-10 text-muted-foreground/40" />
+                    <h3 className="font-semibold">Nenhum pagamento registrado</h3>
+                    <p className="max-w-sm text-sm text-muted-foreground">
+                      Os recebimentos deste cliente (à vista e parcelas do crediário) aparecerão aqui.
+                    </p>
+                  </div>
+                );
+              }
+              return (
+                <>
+                  <div className="flex items-center justify-between border-b bg-emerald-500/5 px-4 py-3">
+                    <span className="text-sm font-medium text-muted-foreground">
+                      Total recebido deste cliente
+                    </span>
+                    <span className="text-lg font-bold text-emerald-600">
+                      {currency(totalReceived)}
+                    </span>
+                  </div>
+                  <div className="divide-y">
+                    {payments.map((p) => (
+                      <div
+                        key={p.id}
+                        className="flex items-center justify-between gap-3 px-4 py-3"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <Badge
+                              variant="secondary"
+                              className={
+                                p.kind === "venda"
+                                  ? "bg-indigo-500/10 text-indigo-600 border-indigo-500/20"
+                                  : "bg-amber-500/10 text-amber-600 border-amber-500/20"
+                              }
+                            >
+                              {p.kind === "venda" ? "À vista" : "Parcela"}
+                            </Badge>
+                            <span className="text-sm font-medium">
+                              {p.method ? methodLabel[p.method] || p.method : "—"}
+                            </span>
+                          </div>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {p.sale?.sale_number ? `Venda #${p.sale.sale_number} · ` : ""}
+                            {new Date(p.occurred_at).toLocaleString("pt-BR", {
+                              day: "2-digit",
+                              month: "2-digit",
+                              year: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                            {p.notes ? ` · ${p.notes}` : ""}
+                          </p>
+                        </div>
+                        <span className="shrink-0 font-bold text-emerald-600">
+                          {currency(Number(p.amount))}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              );
+            })()}
+          </Card>
         </TabsContent>
 
         {/* ---- DADOS ---- */}

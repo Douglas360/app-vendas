@@ -27,6 +27,7 @@ import {
   Sun,
   Moon,
   Store,
+  Wallet,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useState } from "react";
@@ -61,6 +62,11 @@ const NAV_ITEMS = [
     title: "Crediário",
     href: "/dashboard/fiado",
     icon: CreditCard,
+  },
+  {
+    title: "Caixa",
+    href: "/dashboard/caixa",
+    icon: Wallet,
   },
 ];
 
