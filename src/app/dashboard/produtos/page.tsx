@@ -100,6 +100,7 @@ export default function ProdutosPage() {
 
   // Product Dialog State
   const [isProductDialogOpen, setIsProductDialogOpen] = useState(false);
+  const [viewImageUrl, setViewImageUrl] = useState<string | null>(null);
   const [isLabelsOpen, setIsLabelsOpen] = useState(false);
   const [isGeneratingBarcodes, setIsGeneratingBarcodes] = useState(false);
   const [isGeneratingFormBarcode, setIsGeneratingFormBarcode] = useState(false);
@@ -1565,7 +1566,14 @@ export default function ProdutosPage() {
                       )}
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-3">
-                          <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md border bg-muted/30">
+                          <div
+                            className={`relative h-10 w-10 shrink-0 overflow-hidden rounded-md border bg-muted/30 ${
+                              prod.image_url ? "cursor-zoom-in" : ""
+                            }`}
+                            onClick={() => prod.image_url && setViewImageUrl(prod.image_url)}
+                            role={prod.image_url ? "button" : undefined}
+                            title={prod.image_url ? "Ver imagem" : undefined}
+                          >
                             {prod.image_url ? (
                               <Image
                                 src={prod.image_url}
@@ -1739,7 +1747,19 @@ export default function ProdutosPage() {
                     disabled={!isAdmin}
                     className="flex min-w-0 flex-1 items-center gap-3 text-left disabled:cursor-default"
                   >
-                    <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-md border bg-muted/30">
+                    <div
+                      className={`relative h-11 w-11 shrink-0 overflow-hidden rounded-md border bg-muted/30 ${
+                        prod.image_url ? "cursor-zoom-in" : ""
+                      }`}
+                      onClick={(e) => {
+                        if (prod.image_url) {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          setViewImageUrl(prod.image_url);
+                        }
+                      }}
+                      title={prod.image_url ? "Ver imagem" : undefined}
+                    >
                       {prod.image_url ? (
                         <Image
                           src={prod.image_url}
@@ -2585,6 +2605,23 @@ export default function ProdutosPage() {
               Fechar
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Lightbox: imagem do produto ampliada */}
+      <Dialog open={!!viewImageUrl} onOpenChange={(o) => !o && setViewImageUrl(null)}>
+        <DialogContent className="max-w-2xl p-2 sm:p-3">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Imagem do produto</DialogTitle>
+          </DialogHeader>
+          {viewImageUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={viewImageUrl}
+              alt="Imagem do produto"
+              className="max-h-[80vh] w-full rounded-md object-contain"
+            />
+          )}
         </DialogContent>
       </Dialog>
     </div>
