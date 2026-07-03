@@ -1551,11 +1551,22 @@ export default function ProdutosPage() {
               <p className="text-xs font-medium text-muted-foreground">
                 Lucro projetado
               </p>
-              <p className="mt-1 text-xl font-bold text-amber-600">
-                {brl(stockProjectedProfit)}
-              </p>
+              <div className="mt-1 flex items-baseline gap-2">
+                <p className="text-xl font-bold text-amber-600">
+                  {brl(stockProjectedProfit)}
+                </p>
+                {stockCostValue > 0 && (
+                  <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-bold text-amber-600">
+                    {((stockProjectedProfit / stockCostValue) * 100).toLocaleString(
+                      "pt-BR",
+                      { maximumFractionDigits: 1 }
+                    )}
+                    %
+                  </span>
+                )}
+              </div>
               <p className="mt-0.5 text-[11px] text-muted-foreground">
-                Venda menos custo do estoque
+                Margem sobre o custo do estoque
               </p>
             </CardContent>
           </Card>
