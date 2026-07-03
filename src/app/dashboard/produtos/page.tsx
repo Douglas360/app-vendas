@@ -101,6 +101,13 @@ export default function ProdutosPage() {
   // Product Dialog State
   const [isProductDialogOpen, setIsProductDialogOpen] = useState(false);
   const [viewImageUrl, setViewImageUrl] = useState<string | null>(null);
+  const [nameColWidth, setNameColWidth] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      const v = parseInt(localStorage.getItem("app_vendas_name_col_width") || "");
+      if (!Number.isNaN(v)) return v;
+    }
+    return 220;
+  });
   const [isLabelsOpen, setIsLabelsOpen] = useState(false);
   const [isGeneratingBarcodes, setIsGeneratingBarcodes] = useState(false);
   const [isGeneratingFormBarcode, setIsGeneratingFormBarcode] = useState(false);
@@ -1374,6 +1381,30 @@ export default function ProdutosPage() {
     }
   }
 
+  // Persiste a largura escolhida da coluna do nome
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("app_vendas_name_col_width", String(nameColWidth));
+    }
+  }, [nameColWidth]);
+
+  // Redimensiona a coluna "Produto" ao arrastar a alça
+  function handleNameColResize(e: React.PointerEvent) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = nameColWidth;
+    const move = (ev: PointerEvent) => {
+      const w = Math.min(560, Math.max(140, startW + (ev.clientX - startX)));
+      setNameColWidth(w);
+    };
+    const end = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -1507,7 +1538,19 @@ export default function ProdutosPage() {
                       />
                     </TableHead>
                   )}
-                  <TableHead className="w-[220px]">Produto</TableHead>
+                  <TableHead
+                    className="relative select-none"
+                    style={{ width: nameColWidth }}
+                  >
+                    Produto
+                    <span
+                      onPointerDown={handleNameColResize}
+                      title="Arraste para ajustar a largura"
+                      className="absolute right-0 top-0 flex h-full w-2 cursor-col-resize items-center justify-center hover:bg-indigo-400/30"
+                    >
+                      <span className="h-4 w-px bg-border" />
+                    </span>
+                  </TableHead>
                   <TableHead>SKU / Cód. Barras</TableHead>
                   <TableHead>Categoria</TableHead>
                   <TableHead className="text-right">Estoque</TableHead>
@@ -1564,7 +1607,7 @@ export default function ProdutosPage() {
                           />
                         </TableCell>
                       )}
-                      <TableCell className="font-medium">
+                      <TableCell className="font-medium" style={{ width: nameColWidth }}>
                         <div className="flex items-center gap-3">
                           <div
                             className={`relative h-10 w-10 shrink-0 overflow-hidden rounded-md border bg-muted/30 ${
@@ -1595,12 +1638,18 @@ export default function ProdutosPage() {
                                 <button
                                   onClick={() => handleEditProduct(prod)}
                                   title={prod.name}
-                                  className="block truncate max-w-[150px] font-semibold text-left transition-colors hover:text-indigo-600 hover:underline"
+                                  style={{ maxWidth: nameColWidth - 70 }}
+                                  className="block truncate font-semibold text-left transition-colors hover:text-indigo-600 hover:underline"
                                 >
                                   {prod.name}
                                 </button>
                               ) : (
-                                <p className="block truncate max-w-[150px] font-semibold">{prod.name}</p>
+                                <p
+                                  style={{ maxWidth: nameColWidth - 70 }}
+                                  className="block truncate font-semibold"
+                                >
+                                  {prod.name}
+                                </p>
                               )}
                               {hasVariants && (
                                 <Badge variant="secondary" className="shrink-0 text-[10px] bg-purple-500/10 text-purple-600 border-purple-500/20 font-bold px-1.5 py-0.5">
@@ -1609,7 +1658,10 @@ export default function ProdutosPage() {
                               )}
                             </div>
                             {prod.description && (
-                              <p className="truncate max-w-[190px] text-xs text-muted-foreground">
+                              <p
+                                style={{ maxWidth: nameColWidth - 62 }}
+                                className="truncate text-xs text-muted-foreground"
+                              >
                                 {prod.description}
                               </p>
                             )}
@@ -1870,8 +1922,10 @@ export default function ProdutosPage() {
                           alt="Pré-visualização"
                           fill
                           sizes="96px"
-                          className="object-cover"
+                          className="object-cover cursor-zoom-in"
                           unoptimized
+                          onClick={() => setViewImageUrl(imagePreview)}
+                          title="Ver imagem"
                         />
                         <button
                           type="button"
