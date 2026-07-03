@@ -87,6 +87,14 @@ export default function ConfiguracoesPage() {
   });
   const [showKey, setShowKey] = useState(false);
 
+  const [openaiKey, setOpenaiKey] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("app_vendas_openai_key") || "";
+    }
+    return "";
+  });
+  const [showOpenaiKey, setShowOpenaiKey] = useState(false);
+
   // Dados da loja (para o cabeçalho do recibo)
   const [store, setStore] = useState<StoreInfo>(() => getStoreInfo());
   const [autoPrint, setAutoPrint] = useState(true);
@@ -109,6 +117,7 @@ export default function ConfiguracoesPage() {
   function handleSaveAISettings() {
     localStorage.setItem("app_vendas_gemini_key", geminiKey.trim());
     localStorage.setItem("app_vendas_gemini_model", geminiModel);
+    localStorage.setItem("app_vendas_openai_key", openaiKey.trim());
     toast.success("Configurações de IA salvas com sucesso!");
   }
 
@@ -580,7 +589,7 @@ export default function ConfiguracoesPage() {
             </div>
             <div>
               <CardTitle>Inteligência Artificial (IA)</CardTitle>
-              <CardDescription>Configure a integração com o Google Gemini</CardDescription>
+              <CardDescription>Configure as integrações com Google Gemini e OpenAI</CardDescription>
             </div>
           </CardHeader>
           <CardContent className="space-y-4 pt-4 border-t">
@@ -619,6 +628,33 @@ export default function ConfiguracoesPage() {
                   <SelectItem value="gemini-1.5-flash">Gemini 1.5 Flash (Mais leve)</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Usado para preencher nome e descrição do produto a partir da foto.
+              </p>
+            </div>
+
+            <div className="space-y-2 border-t pt-4">
+              <label htmlFor="openai-key" className="text-sm font-semibold block">Chave de API da OpenAI</label>
+              <div className="relative">
+                <input
+                  id="openai-key"
+                  type={showOpenaiKey ? "text" : "password"}
+                  value={openaiKey}
+                  onChange={(e) => setOpenaiKey(e.target.value)}
+                  placeholder="Cole sua API Key da OpenAI (sk-...)"
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 pr-16"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowOpenaiKey(!showOpenaiKey)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs font-semibold"
+                >
+                  {showOpenaiKey ? "Ocultar" : "Mostrar"}
+                </button>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Usada em &ldquo;Estilizar imagem&rdquo; para gerar a foto premium do produto (modelo gpt-image-1). Fica salva apenas no seu navegador.
+              </p>
             </div>
 
             <Button

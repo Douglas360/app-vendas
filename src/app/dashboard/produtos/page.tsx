@@ -378,12 +378,12 @@ export default function ProdutosPage() {
     });
   }
 
-  // Gera uma versão profissional (estúdio) da imagem do produto com a IA (Gemini)
+  // Gera uma versão profissional (estúdio) da imagem do produto com a IA (OpenAI gpt-image-1)
   async function handleStylizeImage() {
-    const apiKey = localStorage.getItem("app_vendas_gemini_key");
+    const apiKey = localStorage.getItem("app_vendas_openai_key");
     if (!apiKey) {
       toast.error("Configuração de IA Ausente", {
-        description: "Configure a Chave de API do Gemini em 'Configurações' do sistema.",
+        description: "Configure a Chave de API da OpenAI em 'Configurações' do sistema.",
       });
       return;
     }
@@ -397,15 +397,13 @@ export default function ProdutosPage() {
     setIsStylizing(true);
     const toastId = toast.loading("IA criando imagem premium...");
     try {
-      let base64Data = "";
-      let mimeType = "";
+      // Obtém a imagem atual como Blob (arquivo enviado ou imagem já salva)
+      let srcBlob: Blob;
       if (imageFile) {
-        base64Data = await fileToBase64(imageFile);
-        mimeType = imageFile.type;
+        srcBlob = imageFile;
       } else if (currentImageUrl) {
-        const res = await urlToBase64(currentImageUrl);
-        base64Data = res.data;
-        mimeType = res.mimeType;
+        const r = await fetch(currentImageUrl);
+        srcBlob = await r.blob();
       } else {
         throw new Error("Nenhuma imagem disponível para estilizar.");
       }
@@ -417,44 +415,37 @@ export default function ProdutosPage() {
         "Mantenha EXATAMENTE o produto original: mesma forma, cor, estampa, logotipos, textura, detalhes e proporções — " +
         "não invente elementos, não troque o modelo, não altere as cores. " +
         "Enquadramento centralizado, produto em destaque, nítido, alta resolução e aparência sofisticada, digna de post no WhatsApp. " +
-        "Sem texto, sem marca d'água e sem pessoas. Retorne apenas a imagem.";
+        "Sem texto, sem marca d'água e sem pessoas.";
 
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  { text: prompt },
-                  { inlineData: { mimeType, data: base64Data } },
-                ],
-              },
-            ],
-          }),
-        }
-      );
+      const form = new FormData();
+      form.append("model", "gpt-image-1");
+      form.append("image", srcBlob, "produto.png");
+      form.append("prompt", prompt);
+      form.append("size", "1024x1024");
+      form.append("quality", "high");
+      form.append("input_fidelity", "high");
+      form.append("n", "1");
+
+      const response = await fetch("https://api.openai.com/v1/images/edits", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: form,
+      });
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
         throw new Error(
-          errData.error?.message || "Erro na chamada da API do Gemini."
+          errData.error?.message || "Erro na chamada da API da OpenAI."
         );
       }
 
       const data = await response.json();
-      const parts: any[] = data.candidates?.[0]?.content?.parts || [];
-      const imgPart = parts.find((p) => p.inlineData?.data);
-      if (!imgPart) {
-        throw new Error(
-          "A IA não retornou uma imagem. Tente com outra foto (fundo mais simples ajuda)."
-        );
+      const b64 = data.data?.[0]?.b64_json;
+      if (!b64) {
+        throw new Error("A IA não retornou uma imagem. Tente novamente.");
       }
 
-      const outMime = imgPart.inlineData.mimeType || "image/png";
-      const outFile = base64ToFile(imgPart.inlineData.data, outMime);
+      const outFile = base64ToFile(b64, "image/png");
 
       // Guarda o estado atual para permitir "Desfazer"
       setStylizeBackup({
@@ -1819,15 +1810,15 @@ export default function ProdutosPage() {
 
       {/* Product Add/Edit Dialog */}
       <Dialog open={isProductDialogOpen} onOpenChange={setIsProductDialogOpen}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
+        <DialogContent className="max-w-xl max-h-[90vh] flex flex-col">
+          <DialogHeader className="shrink-0">
             <DialogTitle>{editingProduct ? "Editar Produto" : "Novo Produto"}</DialogTitle>
             <DialogDescription>
               Preencha os campos abaixo para cadastrar ou atualizar o produto no catálogo.
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleSaveProduct} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+          <form onSubmit={handleSaveProduct} className="flex min-h-0 flex-1 flex-col">
+            <div className="grid grid-cols-2 gap-4 flex-1 overflow-y-auto pr-1 -mr-1 py-1">
               <div className="col-span-2 space-y-1.5">
                 <Label htmlFor="name">Nome do Produto *</Label>
                 <Input
@@ -2294,7 +2285,7 @@ export default function ProdutosPage() {
               </div>
             </div>
 
-            <DialogFooter className="pt-4">
+            <DialogFooter className="shrink-0 border-t pt-4 mt-3">
               <Button type="button" variant="outline" onClick={() => setIsProductDialogOpen(false)}>
                 Cancelar
               </Button>
