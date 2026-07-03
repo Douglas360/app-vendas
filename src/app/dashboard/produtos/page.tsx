@@ -981,6 +981,20 @@ export default function ProdutosPage() {
     (p) => !products.some((c) => c.parent_id === p.id)
   );
 
+  // ---- Valor em estoque ----
+  const stockUnits = sellableProducts.reduce((s, p) => s + p.stock_quantity, 0);
+  const stockCostValue = sellableProducts.reduce(
+    (s, p) => s + p.stock_quantity * p.cost_price,
+    0
+  );
+  const stockSaleValue = sellableProducts.reduce(
+    (s, p) => s + p.stock_quantity * p.sale_price,
+    0
+  );
+  const stockProjectedProfit = stockSaleValue - stockCostValue;
+  const brl = (v: number) =>
+    v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
   // Expande a seleção (linhas são produtos de topo): pais viram suas variações
   const expandSelection = (ids: Set<string>): Product[] => {
     const out: Product[] = [];
@@ -1502,6 +1516,64 @@ export default function ProdutosPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Resumo do valor em estoque */}
+      {!isLoading && (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Card className="border shadow-sm">
+            <CardContent className="p-4">
+              <p className="text-xs font-medium text-muted-foreground">
+                Valor em estoque (custo)
+              </p>
+              <p className="mt-1 text-xl font-bold text-indigo-600">
+                {brl(stockCostValue)}
+              </p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                Quanto você investiu no estoque atual
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="border shadow-sm">
+            <CardContent className="p-4">
+              <p className="text-xs font-medium text-muted-foreground">
+                Valor em estoque (venda)
+              </p>
+              <p className="mt-1 text-xl font-bold text-emerald-600">
+                {brl(stockSaleValue)}
+              </p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                Se vender tudo pelo preço atual
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="border shadow-sm">
+            <CardContent className="p-4">
+              <p className="text-xs font-medium text-muted-foreground">
+                Lucro projetado
+              </p>
+              <p className="mt-1 text-xl font-bold text-amber-600">
+                {brl(stockProjectedProfit)}
+              </p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                Venda menos custo do estoque
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="border shadow-sm">
+            <CardContent className="p-4">
+              <p className="text-xs font-medium text-muted-foreground">
+                Itens em estoque
+              </p>
+              <p className="mt-1 text-xl font-bold">
+                {stockUnits.toLocaleString("pt-BR")}
+              </p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                {sellableProducts.length} produto(s) no catálogo
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Products Table */}
       <Card className="border shadow-sm overflow-hidden">
