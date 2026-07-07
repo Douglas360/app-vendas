@@ -15,6 +15,9 @@ export interface EvolutionConfig {
 
 export interface EvolutionSettings extends EvolutionConfig {
   connected: boolean;
+  receiptEnabled: boolean;
+  paymentConfirmEnabled: boolean;
+  remindersEnabled: boolean;
 }
 
 // ---- Persistência no banco (tabela app_settings, linha única id=1) ----
@@ -24,7 +27,7 @@ export async function fetchEvolutionSettings(
   const { data } = await supabase
     .from("app_settings")
     .select(
-      "evolution_url, evolution_api_key, evolution_instance, evolution_connected"
+      "evolution_url, evolution_api_key, evolution_instance, evolution_connected, wa_receipt_enabled, wa_payment_confirm_enabled, wa_reminders_enabled"
     )
     .eq("id", 1)
     .single();
@@ -34,6 +37,9 @@ export async function fetchEvolutionSettings(
     apiKey: data?.evolution_api_key || "",
     instance: data?.evolution_instance || "",
     connected: !!data?.evolution_connected,
+    receiptEnabled: data?.wa_receipt_enabled !== false,
+    paymentConfirmEnabled: data?.wa_payment_confirm_enabled !== false,
+    remindersEnabled: data?.wa_reminders_enabled !== false,
   };
 }
 
@@ -374,7 +380,21 @@ export async function sendReceiptToWhatsapp(
 ): Promise<boolean> {
   const settings = await fetchEvolutionSettings(supabase);
   if (!isConfigured(settings) || !settings.connected) return false;
+  if (!settings.receiptEnabled) return false;
   const text = buildWhatsappReceipt(data);
+  await sendWhatsappText(settings, phone, text);
+  return true;
+}
+
+// Envia a confirmação de pagamento de parcela (respeita o interruptor).
+export async function sendPaymentConfirmation(
+  supabase: SupabaseClient,
+  phone: string,
+  text: string
+): Promise<boolean> {
+  const settings = await fetchEvolutionSettings(supabase);
+  if (!isConfigured(settings) || !settings.connected) return false;
+  if (!settings.paymentConfirmEnabled) return false;
   await sendWhatsappText(settings, phone, text);
   return true;
 }

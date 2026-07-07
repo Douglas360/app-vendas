@@ -15,6 +15,7 @@ import { getStoreInfo, type ReceiptData } from "@/lib/receipt";
 import {
   sendReceiptToWhatsapp,
   sendCustomerMessage,
+  sendPaymentConfirmation,
   buildPaymentMessage,
   buildCollectionMessage,
 } from "@/lib/whatsapp";
@@ -678,7 +679,7 @@ export default function ClienteDetalhePage() {
             installmentPaid: remainingNow <= 0.001,
             totalDebt: Number(custData?.current_debt ?? 0),
           });
-          const sent = await sendCustomerMessage(supabase, customer.phone, msg);
+          const sent = await sendPaymentConfirmation(supabase, customer.phone, msg);
           if (sent) toast.success("Confirmação enviada no WhatsApp do cliente!");
         } catch (e) {
           console.error(e);

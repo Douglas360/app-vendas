@@ -28,6 +28,7 @@ import {
   Moon,
   Store,
   Wallet,
+  Bell,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useState } from "react";
@@ -67,6 +68,11 @@ const NAV_ITEMS = [
     title: "Caixa",
     href: "/dashboard/caixa",
     icon: Wallet,
+  },
+  {
+    title: "Notificações",
+    href: "/dashboard/notificacoes",
+    icon: Bell,
   },
 ];
 
