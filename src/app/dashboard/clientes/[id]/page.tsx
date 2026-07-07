@@ -16,6 +16,7 @@ import {
   sendReceiptToWhatsapp,
   sendCustomerMessage,
   buildPaymentMessage,
+  buildCollectionMessage,
 } from "@/lib/whatsapp";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -595,6 +596,38 @@ export default function ClienteDetalhePage() {
     setIsPaymentOpen(true);
   }
 
+  // Cobrança manual da parcela via WhatsApp
+  const [chargingId, setChargingId] = useState<string | null>(null);
+  async function handleChargeInstallment(inst: InstallmentRow) {
+    if (!customer?.phone) {
+      toast.error("Cliente sem telefone", {
+        description: "Cadastre o telefone do cliente para enviar a cobrança.",
+      });
+      return;
+    }
+    setChargingId(inst.id);
+    try {
+      const msg = buildCollectionMessage({
+        customerName: customer.full_name,
+        remaining: inst.amount - inst.amount_paid,
+        dueDate: inst.due_date,
+      });
+      const sent = await sendCustomerMessage(supabase, customer.phone, msg);
+      if (sent) {
+        toast.success("Cobrança enviada no WhatsApp!");
+      } else {
+        toast.error("WhatsApp não conectado.", {
+          description: "Conecte em Configurações para enviar cobranças.",
+        });
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Tente novamente.";
+      toast.error("Falha ao enviar cobrança", { description: message });
+    } finally {
+      setChargingId(null);
+    }
+  }
+
   async function handleRegisterPayment(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedInstallment) return;
@@ -1160,13 +1193,29 @@ export default function ClienteDetalhePage() {
                                   </Button>
                                 )}
                                 {!isPaid ? (
-                                  <Button
-                                    size="sm"
-                                    onClick={() => handleOpenPayment(inst)}
-                                    className="h-7 px-2.5 text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
-                                  >
-                                    Receber
-                                  </Button>
+                                  <>
+                                    <Button
+                                      size="icon"
+                                      variant="ghost"
+                                      onClick={() => handleChargeInstallment(inst)}
+                                      disabled={chargingId === inst.id}
+                                      title="Cobrar no WhatsApp"
+                                      className="h-7 w-7 text-emerald-600 hover:bg-emerald-500/10"
+                                    >
+                                      {chargingId === inst.id ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      ) : (
+                                        <MessageCircle className="h-3.5 w-3.5" />
+                                      )}
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      onClick={() => handleOpenPayment(inst)}
+                                      className="h-7 px-2.5 text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                                    >
+                                      Receber
+                                    </Button>
+                                  </>
                                 ) : (
                                   <span className="flex items-center justify-end gap-1 text-[10px] text-muted-foreground italic">
                                     <CheckCircle className="h-3 w-3 text-emerald-500" />

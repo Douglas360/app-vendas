@@ -11,6 +11,7 @@ export interface StoreInfo {
   address?: string;
   footer?: string;
   paperWidth?: string; // largura do cupom em mm: "58" ou "80"
+  pixKey?: string; // chave PIX para pagamento das parcelas
 }
 
 export interface ReceiptItem {
@@ -50,6 +51,7 @@ const STORE_KEYS = {
   address: "app_vendas_store_address",
   footer: "app_vendas_store_footer",
   paperWidth: "app_vendas_store_paper_width",
+  pixKey: "app_vendas_store_pix_key",
 };
 
 // Lê os dados da loja salvos no navegador (com padrões)
@@ -66,6 +68,7 @@ export function getStoreInfo(): StoreInfo {
       localStorage.getItem(STORE_KEYS.footer) ||
       "Obrigado pela preferência! Volte sempre.",
     paperWidth: localStorage.getItem(STORE_KEYS.paperWidth) || "80",
+    pixKey: localStorage.getItem(STORE_KEYS.pixKey) || "",
   };
 }
 
@@ -77,6 +80,7 @@ export function saveStoreInfo(info: StoreInfo) {
   localStorage.setItem(STORE_KEYS.address, info.address || "");
   localStorage.setItem(STORE_KEYS.footer, info.footer || "");
   localStorage.setItem(STORE_KEYS.paperWidth, info.paperWidth || "80");
+  localStorage.setItem(STORE_KEYS.pixKey, info.pixKey || "");
 }
 
 // Preferência: imprimir o recibo automaticamente ao finalizar a venda (padrão: sim)

@@ -1,0 +1,313 @@
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "jsr:@supabase/supabase-js@2";
+import webpush from "npm:web-push@3.6.7";
+
+function brl(v: number): string {
+  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+function fmtDate(s: string): string {
+  const [y, m, d] = s.split("-");
+  return `${d}/${m}/${y}`;
+}
+function ymdInTZ(offsetDays: number): string {
+  const d = new Date(Date.now() + offsetDays * 86400000);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+  const get = (t: string) => parts.find((p) => p.type === t)!.value;
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+// Normaliza telefone para o formato do WhatsApp (DDI 55 + DDD + número)
+function normalizePhone(phone: string): string {
+  const digits = (phone || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length <= 11 && !digits.startsWith("55")) return `55${digits}`;
+  return digits;
+}
+
+// Mensagem profissional para o cliente conforme o vencimento
+function buildCustomerMessage(
+  bucket: string,
+  firstName: string,
+  remaining: number,
+  dueDate: string,
+  storeName: string,
+  pixKey: string
+): string {
+  const lines: string[] = [];
+  lines.push(`Olá, ${firstName}.`);
+  lines.push("");
+  if (bucket === "vespera") {
+    lines.push(
+      `Lembrete: a parcela de *${brl(remaining)}* referente à sua compra vence *amanhã (${fmtDate(dueDate)})*.`
+    );
+  } else if (bucket === "hoje") {
+    lines.push(
+      `A parcela de *${brl(remaining)}* referente à sua compra vence *hoje (${fmtDate(dueDate)})*.`
+    );
+  } else {
+    lines.push(
+      `Consta em aberto a parcela de *${brl(remaining)}*, vencida em *${fmtDate(dueDate)}*.`
+    );
+  }
+  lines.push("");
+  if (pixKey) {
+    lines.push(
+      bucket === "atrasada"
+        ? `Para regularizar, efetue o pagamento via PIX na chave *${pixKey}* e envie o comprovante por aqui.`
+        : `Você pode efetuar o pagamento via PIX na chave *${pixKey}*. Após o pagamento, envie o comprovante por aqui.`
+    );
+  } else {
+    lines.push("Para efetuar o pagamento ou tirar dúvidas, entre em contato por aqui.");
+  }
+  lines.push("");
+  lines.push("Caso o pagamento já tenha sido efetuado, desconsidere esta mensagem.");
+  if (storeName) {
+    lines.push("");
+    lines.push(storeName);
+  }
+  return lines.join("\n");
+}
+
+Deno.serve(async (req) => {
+  try {
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
+
+    const { data: secrets } = await supabase
+      .from("app_secrets")
+      .select("vapid_public, vapid_private, cron_secret")
+      .eq("id", 1)
+      .single();
+
+    const provided = req.headers.get("x-cron-secret");
+    if (!secrets?.cron_secret || provided !== secrets.cron_secret) {
+      return new Response(JSON.stringify({ error: "unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (!secrets.vapid_public || !secrets.vapid_private) {
+      return new Response(JSON.stringify({ error: "vapid keys missing" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    webpush.setVapidDetails(
+      "mailto:admin@vendafacil.app",
+      secrets.vapid_public,
+      secrets.vapid_private
+    );
+
+    // Configuração do WhatsApp (Evolution) + nome da loja + liga/desliga
+    const { data: settings } = await supabase
+      .from("app_settings")
+      .select(
+        "evolution_url, evolution_api_key, evolution_instance, evolution_connected, store_name, wa_reminders_enabled, pix_key"
+      )
+      .eq("id", 1)
+      .single();
+
+    const waEnabled = !!settings?.wa_reminders_enabled;
+    const pixKey: string = settings?.pix_key || "";
+    const evoOk = !!(
+      settings?.evolution_url &&
+      settings?.evolution_api_key &&
+      settings?.evolution_instance &&
+      settings?.evolution_connected
+    );
+    const storeName: string = settings?.store_name || "";
+
+    async function sendWhatsAppText(number: string, text: string) {
+      const base = String(settings!.evolution_url).replace(/\/+$/, "");
+      const res = await fetch(
+        `${base}/message/sendText/${encodeURIComponent(String(settings!.evolution_instance))}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: String(settings!.evolution_api_key),
+          },
+          body: JSON.stringify({ number, text }),
+        }
+      );
+      if (!res.ok) throw new Error(`Evolution ${res.status}`);
+    }
+
+    const todayStr = ymdInTZ(0);
+    const tomorrowStr = ymdInTZ(1);
+
+    // Parcelas em aberto que vencem hoje, amanhã ou já atrasadas
+    const { data: insts, error: instErr } = await supabase
+      .from("credit_installments")
+      .select(
+        "id, installment_number, amount, amount_paid, due_date, status, customer:customers(id, full_name, current_debt, phone), sale:sales(sale_number)"
+      )
+      .in("status", ["pendente", "atrasado"])
+      .or(`due_date.eq.${todayStr},due_date.eq.${tomorrowStr},due_date.lt.${todayStr}`)
+      .order("due_date", { ascending: true });
+
+    if (instErr) throw instErr;
+
+    // Admins ativos
+    const { data: admins } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("role", "admin")
+      .eq("is_active", true);
+    const adminIds = (admins || []).map((a: { id: string }) => a.id);
+
+    const { data: subs } = await supabase
+      .from("push_subscriptions")
+      .select("id, user_id, endpoint, p256dh, auth")
+      .in("user_id", adminIds.length ? adminIds : ["00000000-0000-0000-0000-000000000000"]);
+
+    // Dedupe: notificações de crediário criadas nas últimas 20h
+    const since = new Date(Date.now() - 20 * 3600 * 1000).toISOString();
+    const { data: existingNotifs } = await supabase
+      .from("notifications")
+      .select("user_id, metadata")
+      .eq("type", "crediario")
+      .gte("created_at", since);
+    const existingSet = new Set(
+      (existingNotifs || []).map(
+        (n: { user_id: string; metadata: { dedupe?: string } }) =>
+          `${n.user_id}:${n.metadata?.dedupe}`
+      )
+    );
+
+    const results = {
+      installments: (insts || []).length,
+      created: 0,
+      pushed: 0,
+      removed: 0,
+      waSent: 0,
+      errors: [] as string[],
+    };
+
+    for (const inst of insts || []) {
+      const remaining = Number(inst.amount) - Number(inst.amount_paid);
+      if (remaining <= 0.001) continue;
+
+      const cust = inst.customer as {
+        id: string;
+        full_name: string;
+        current_debt: number;
+        phone: string | null;
+      } | null;
+      if (!cust) continue;
+      const saleNo = (inst.sale as { sale_number: number } | null)?.sale_number ?? "?";
+
+      let bucket: string;
+      if (inst.due_date === tomorrowStr) bucket = "vespera";
+      else if (inst.due_date === todayStr) bucket = "hoje";
+      else bucket = "atrasada";
+
+      // ---- WhatsApp para o CLIENTE (profissional) ----
+      if (waEnabled && evoOk && cust.phone) {
+        const number = normalizePhone(cust.phone);
+        if (number) {
+          // idempotência: 1 envio por parcela/bucket/dia
+          const { data: logIns } = await supabase
+            .from("whatsapp_reminders_log")
+            .upsert(
+              { installment_id: inst.id, bucket, sent_on: todayStr },
+              { onConflict: "installment_id,bucket,sent_on", ignoreDuplicates: true }
+            )
+            .select();
+
+          if (logIns && logIns.length > 0) {
+            const firstName = cust.full_name.split(" ")[0] || cust.full_name;
+            const msg = buildCustomerMessage(
+              bucket,
+              firstName,
+              remaining,
+              inst.due_date,
+              storeName,
+              pixKey
+            );
+            try {
+              await sendWhatsAppText(number, msg);
+              results.waSent++;
+            } catch (e) {
+              // libera o log para nova tentativa numa próxima execução do dia
+              await supabase
+                .from("whatsapp_reminders_log")
+                .delete()
+                .eq("installment_id", inst.id)
+                .eq("bucket", bucket)
+                .eq("sent_on", todayStr);
+              results.errors.push("wa:" + String((e as Error)?.message || e));
+            }
+          }
+        }
+      }
+
+      // ---- Push + sininho para os ADMINS ----
+      let title: string;
+      let body: string;
+      if (bucket === "vespera") {
+        title = `💰 Vence amanhã — ${cust.full_name}`;
+        body = `${brl(remaining)} · parcela ${inst.installment_number} (venda #${saleNo}). Saldo do cliente: ${brl(Number(cust.current_debt))}.`;
+      } else if (bucket === "hoje") {
+        title = `📌 Vence hoje — ${cust.full_name}`;
+        body = `${brl(remaining)} · parcela ${inst.installment_number} (venda #${saleNo}). Saldo do cliente: ${brl(Number(cust.current_debt))}.`;
+      } else {
+        title = `⚠️ Em atraso — ${cust.full_name}`;
+        body = `Venceu ${fmtDate(inst.due_date)} · ${brl(remaining)} · parcela ${inst.installment_number} (venda #${saleNo}).`;
+      }
+
+      const link = `/dashboard/clientes/${cust.id}`;
+      const dedupe = `${inst.id}:${bucket}:${todayStr}`;
+
+      for (const adminId of adminIds) {
+        if (existingSet.has(`${adminId}:${dedupe}`)) continue;
+
+        await supabase.from("notifications").insert({
+          user_id: adminId,
+          title,
+          body,
+          type: "crediario",
+          link,
+          metadata: { dedupe, installment_id: inst.id, bucket, customer_id: cust.id },
+        });
+        results.created++;
+
+        const payload = JSON.stringify({ title, body, url: link });
+        for (const sub of (subs || []).filter((s) => s.user_id === adminId)) {
+          try {
+            await webpush.sendNotification(
+              { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+              payload
+            );
+            results.pushed++;
+          } catch (e) {
+            const code = (e as { statusCode?: number })?.statusCode;
+            if (code === 404 || code === 410) {
+              await supabase.from("push_subscriptions").delete().eq("id", sub.id);
+              results.removed++;
+            } else {
+              results.errors.push(String((e as Error)?.message || e));
+            }
+          }
+        }
+      }
+    }
+
+    return new Response(JSON.stringify(results), {
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: String((e as Error)?.message || e) }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+});

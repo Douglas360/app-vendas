@@ -121,12 +121,17 @@ export default function ConfiguracoesPage() {
     toast.success("Configurações de IA salvas com sucesso!");
   }
 
-  function handleSaveStore() {
+  async function handleSaveStore() {
     if (!store.name.trim()) {
       toast.error("Informe o nome da loja.");
       return;
     }
     saveStoreInfo(store);
+    // Persiste nome da loja e chave PIX no banco (usados nos lembretes do WhatsApp)
+    await supabase
+      .from("app_settings")
+      .update({ store_name: store.name.trim(), pix_key: (store.pixKey || "").trim() })
+      .eq("id", 1);
     toast.success("Dados da loja salvos!", {
       description: "Aparecerão no cabeçalho dos recibos.",
     });
@@ -163,6 +168,51 @@ export default function ConfiguracoesPage() {
   const [evoConnecting, setEvoConnecting] = useState(false);
   const [evoChecking, setEvoChecking] = useState(false);
   const [evoConnected, setEvoConnected] = useState(false);
+  const [waReminders, setWaReminders] = useState(true);
+
+  // Carrega a preferência de lembrete automático ao cliente
+  useEffect(() => {
+    supabase
+      .from("app_settings")
+      .select("wa_reminders_enabled, pix_key, store_name")
+      .eq("id", 1)
+      .single()
+      .then(
+        (res: {
+          data: {
+            wa_reminders_enabled: boolean;
+            pix_key: string | null;
+            store_name: string | null;
+          } | null;
+        }) => {
+          if (!res.data) return;
+          setWaReminders(!!res.data.wa_reminders_enabled);
+          // Semeia PIX/nome do banco caso ainda não estejam salvos localmente
+          setStore((prev) => {
+            const next = { ...prev };
+            if (!prev.pixKey && res.data!.pix_key) next.pixKey = res.data!.pix_key;
+            if ((!prev.name || prev.name === "VendaFácil") && res.data!.store_name) {
+              next.name = res.data!.store_name;
+            }
+            return next;
+          });
+        }
+      );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleToggleWaReminders(value: boolean) {
+    setWaReminders(value);
+    await supabase
+      .from("app_settings")
+      .update({ wa_reminders_enabled: value })
+      .eq("id", 1);
+    toast.success(
+      value
+        ? "Lembrete automático ao cliente ativado."
+        : "Lembrete automático ao cliente desativado."
+    );
+  }
 
   // Carrega a config salva no banco
   useEffect(() => {
@@ -708,6 +758,18 @@ export default function ConfiguracoesPage() {
                   placeholder="(11) 99999-8888"
                 />
               </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="store-pix">Chave PIX (parcelas)</Label>
+                <Input
+                  id="store-pix"
+                  value={store.pixKey || ""}
+                  onChange={(e) => setStore({ ...store, pixKey: e.target.value })}
+                  placeholder="(41) 99999-9999, CPF, e-mail..."
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Aparece no recibo e nas cobranças de crediário enviadas ao cliente.
+                </p>
+              </div>
               <div className="space-y-1.5 sm:col-span-2">
                 <Label htmlFor="store-address">Endereço</Label>
                 <Input
@@ -886,6 +948,23 @@ export default function ConfiguracoesPage() {
                 {evoChecking && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Verificar status
               </Button>
+            </div>
+
+            <div className="flex items-start justify-between gap-3 rounded-lg border p-3">
+              <div>
+                <p className="text-sm font-semibold">Lembrete de crediário ao cliente</p>
+                <p className="text-xs text-muted-foreground">
+                  Envia automaticamente (às 9h) uma mensagem amigável ao cliente sobre parcelas que
+                  vencem amanhã, hoje ou estão atrasadas. Requer WhatsApp conectado e telefone no
+                  cadastro do cliente.
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={waReminders}
+                onChange={(e) => handleToggleWaReminders(e.target.checked)}
+                className="mt-1 h-5 w-5 shrink-0 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+              />
             </div>
 
             <p className="text-[10px] text-muted-foreground">

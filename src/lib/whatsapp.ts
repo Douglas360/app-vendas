@@ -234,6 +234,11 @@ export function buildWhatsappReceipt(data: ReceiptData): string {
       const due = new Date(inst.dueDate + "T00:00:00").toLocaleDateString("pt-BR");
       lines.push(`   ${inst.number}ª · venc. ${due} · ${brl(inst.amount)}`);
     });
+    if (data.store.pixKey) {
+      lines.push("");
+      lines.push(`💳 *Pague as parcelas via PIX:* ${data.store.pixKey}`);
+      lines.push("Após o pagamento, envie o comprovante por aqui.");
+    }
   }
 
   lines.push("──────────────");
@@ -314,6 +319,49 @@ export function buildPaymentMessage(input: PaymentMessageInput): string {
   } else {
     lines.push("Você está com tudo em dia. Obrigado! 🙏");
   }
+  return lines.join("\n");
+}
+
+// Monta a mensagem de cobrança de parcela (tom profissional, com PIX)
+export function buildCollectionMessage(input: {
+  customerName: string;
+  remaining: number;
+  dueDate: string; // YYYY-MM-DD
+}): string {
+  const store = getStoreInfo();
+  const firstName = input.customerName.split(" ")[0] || input.customerName;
+  const due = new Date(input.dueDate + "T00:00:00");
+  const dueStr = due.toLocaleDateString("pt-BR");
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((due.getTime() - today.getTime()) / 86400000);
+
+  const lines: string[] = [];
+  lines.push(`Olá, ${firstName}.`);
+  lines.push("");
+  if (diffDays < 0) {
+    lines.push(
+      `Consta em aberto a parcela de *${brl(input.remaining)}*, vencida em *${dueStr}*.`
+    );
+    lines.push("Para regularizar, efetue o pagamento via PIX:");
+  } else if (diffDays === 0) {
+    lines.push(`A parcela de *${brl(input.remaining)}* vence *hoje (${dueStr})*.`);
+    lines.push("Você pode efetuar o pagamento via PIX:");
+  } else {
+    lines.push(
+      `Lembrete: a parcela de *${brl(input.remaining)}* vence em *${dueStr}*.`
+    );
+    lines.push("Você pode efetuar o pagamento via PIX:");
+  }
+  if (store.pixKey) {
+    lines.push(`Chave PIX: *${store.pixKey}*`);
+  }
+  lines.push("");
+  lines.push("Após o pagamento, envie o comprovante por aqui.");
+  lines.push("Caso já tenha efetuado o pagamento, desconsidere esta mensagem.");
+  lines.push("");
+  lines.push(store.name);
   return lines.join("\n");
 }
 
