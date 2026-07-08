@@ -281,17 +281,83 @@ export async function postStatusToWhatsapp(
   return true;
 }
 
+// ---- Histórico de envios (notification_log) ----
+export interface SendLogMeta {
+  kind: string; // comprovante | confirmacao_pagamento | cobranca_manual | lembrete
+  recipientType?: "cliente" | "admin";
+  customerId?: string | null;
+  recipientName?: string | null;
+  saleId?: string | null;
+  installmentId?: string | null;
+  title?: string | null;
+}
+
+async function startLog(
+  supabase: SupabaseClient,
+  phone: string,
+  text: string,
+  meta: SendLogMeta
+): Promise<string | null> {
+  try {
+    const { data } = await supabase
+      .from("notification_log")
+      .insert({
+        channel: "whatsapp",
+        kind: meta.kind,
+        recipient_type: meta.recipientType ?? "cliente",
+        customer_id: meta.customerId ?? null,
+        recipient_name: meta.recipientName ?? null,
+        recipient_phone: phone,
+        title: meta.title ?? null,
+        body: text,
+        status: "em_andamento",
+        sale_id: meta.saleId ?? null,
+        installment_id: meta.installmentId ?? null,
+      })
+      .select("id")
+      .single();
+    return (data as { id: string } | null)?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function endLog(
+  supabase: SupabaseClient,
+  id: string | null,
+  ok: boolean,
+  error?: string
+) {
+  if (!id) return;
+  try {
+    await supabase
+      .from("notification_log")
+      .update({ status: ok ? "enviado" : "falhou", error: error ?? null })
+      .eq("id", id);
+  } catch {
+    /* ignore */
+  }
+}
+
 // Envia uma mensagem de texto ao cliente, se o WhatsApp estiver conectado.
 // Retorna true se enviou; false se não está configurado/conectado.
 export async function sendCustomerMessage(
   supabase: SupabaseClient,
   phone: string,
-  text: string
+  text: string,
+  meta?: SendLogMeta
 ): Promise<boolean> {
   const settings = await fetchEvolutionSettings(supabase);
   if (!isConfigured(settings) || !settings.connected) return false;
-  await sendWhatsappText(settings, phone, text);
-  return true;
+  const id = meta ? await startLog(supabase, phone, text, meta) : null;
+  try {
+    await sendWhatsappText(settings, phone, text);
+    await endLog(supabase, id, true);
+    return true;
+  } catch (e) {
+    await endLog(supabase, id, false, String((e as Error)?.message || e));
+    throw e;
+  }
 }
 
 export interface PaymentMessageInput {
@@ -382,19 +448,41 @@ export async function sendReceiptToWhatsapp(
   if (!isConfigured(settings) || !settings.connected) return false;
   if (!settings.receiptEnabled) return false;
   const text = buildWhatsappReceipt(data);
-  await sendWhatsappText(settings, phone, text);
-  return true;
+  const id = await startLog(supabase, phone, text, {
+    kind: "comprovante",
+    recipientName: data.customer ?? null,
+    title: `Comprovante da venda #${data.saleNumber}`,
+  });
+  try {
+    await sendWhatsappText(settings, phone, text);
+    await endLog(supabase, id, true);
+    return true;
+  } catch (e) {
+    await endLog(supabase, id, false, String((e as Error)?.message || e));
+    throw e;
+  }
 }
 
 // Envia a confirmação de pagamento de parcela (respeita o interruptor).
 export async function sendPaymentConfirmation(
   supabase: SupabaseClient,
   phone: string,
-  text: string
+  text: string,
+  meta?: SendLogMeta
 ): Promise<boolean> {
   const settings = await fetchEvolutionSettings(supabase);
   if (!isConfigured(settings) || !settings.connected) return false;
   if (!settings.paymentConfirmEnabled) return false;
-  await sendWhatsappText(settings, phone, text);
-  return true;
+  const id = await startLog(supabase, phone, text, {
+    kind: "confirmacao_pagamento",
+    ...(meta || {}),
+  });
+  try {
+    await sendWhatsappText(settings, phone, text);
+    await endLog(supabase, id, true);
+    return true;
+  } catch (e) {
+    await endLog(supabase, id, false, String((e as Error)?.message || e));
+    throw e;
+  }
 }

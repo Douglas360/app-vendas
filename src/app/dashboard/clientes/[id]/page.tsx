@@ -613,7 +613,14 @@ export default function ClienteDetalhePage() {
         remaining: inst.amount - inst.amount_paid,
         dueDate: inst.due_date,
       });
-      const sent = await sendCustomerMessage(supabase, customer.phone, msg);
+      const sent = await sendCustomerMessage(supabase, customer.phone, msg, {
+        kind: "cobranca_manual",
+        recipientType: "cliente",
+        customerId: customer.id,
+        recipientName: customer.full_name,
+        installmentId: inst.id,
+        saleId: (inst as { sale_id?: string }).sale_id ?? null,
+      });
       if (sent) {
         toast.success("Cobrança enviada no WhatsApp!");
       } else {
@@ -679,7 +686,14 @@ export default function ClienteDetalhePage() {
             installmentPaid: remainingNow <= 0.001,
             totalDebt: Number(custData?.current_debt ?? 0),
           });
-          const sent = await sendPaymentConfirmation(supabase, customer.phone, msg);
+          const sent = await sendPaymentConfirmation(supabase, customer.phone, msg, {
+            kind: "confirmacao_pagamento",
+            recipientType: "cliente",
+            customerId: customer.id,
+            recipientName: customer.full_name,
+            installmentId: inst.id,
+            saleId: (inst as { sale_id?: string }).sale_id ?? null,
+          });
           if (sent) toast.success("Confirmação enviada no WhatsApp do cliente!");
         } catch (e) {
           console.error(e);

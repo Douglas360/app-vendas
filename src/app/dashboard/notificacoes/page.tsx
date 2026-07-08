@@ -7,6 +7,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+import {
   Bell,
   Loader2,
   MessageCircle,
@@ -17,6 +23,9 @@ import {
   XCircle,
   Wifi,
   WifiOff,
+  History,
+  RefreshCw,
+  AlertCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { isAutoPrintReceiptEnabled, setAutoPrintReceipt } from "@/lib/receipt";
@@ -150,6 +159,41 @@ export default function NotificacoesPage() {
   const [autoPrint, setAutoPrint] = useState(true);
   const [pushPermission, setPushPermission] = useState<string>("default");
 
+  interface LogRow {
+    id: string;
+    channel: string;
+    kind: string;
+    recipient_name: string | null;
+    recipient_phone: string | null;
+    title: string | null;
+    status: string;
+    error: string | null;
+    created_at: string;
+  }
+  const [history, setHistory] = useState<LogRow[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const { data } = await supabase
+        .from("notification_log")
+        .select(
+          "id, channel, kind, recipient_name, recipient_phone, title, status, error, created_at"
+        )
+        .order("created_at", { ascending: false })
+        .limit(300);
+      setHistory((data as LogRow[]) || []);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [supabase]);
+
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
+
   const load = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -228,6 +272,19 @@ export default function NotificacoesPage() {
         </p>
       </div>
 
+      <Tabs defaultValue="config" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="config">
+            <Bell className="mr-1.5 h-4 w-4" />
+            Configuração
+          </TabsTrigger>
+          <TabsTrigger value="historico">
+            <History className="mr-1.5 h-4 w-4" />
+            Histórico de envios
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="config" className="space-y-6">
       {/* Dependências / status geral */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Card className="border shadow-sm">
@@ -362,6 +419,116 @@ export default function NotificacoesPage() {
           />
         </div>
       </div>
+        </TabsContent>
+
+        {/* ---- HISTÓRICO ---- */}
+        <TabsContent value="historico" className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                { v: "all", l: "Todas" },
+                { v: "enviado", l: "Enviadas" },
+                { v: "falhou", l: "Falhas" },
+                { v: "em_andamento", l: "Em andamento" },
+              ].map((f) => (
+                <Button
+                  key={f.v}
+                  size="sm"
+                  variant={statusFilter === f.v ? "default" : "outline"}
+                  onClick={() => setStatusFilter(f.v)}
+                  className="h-8"
+                >
+                  {f.l}
+                </Button>
+              ))}
+            </div>
+            <Button size="sm" variant="outline" onClick={loadHistory} disabled={historyLoading}>
+              <RefreshCw className={`mr-2 h-4 w-4 ${historyLoading ? "animate-spin" : ""}`} />
+              Atualizar
+            </Button>
+          </div>
+
+          {historyLoading ? (
+            <div className="flex h-40 items-center justify-center">
+              <Loader2 className="h-7 w-7 animate-spin text-indigo-500" />
+            </div>
+          ) : (
+            (() => {
+              const kindLabel: Record<string, string> = {
+                comprovante: "Comprovante de venda",
+                confirmacao_pagamento: "Confirmação de pagamento",
+                lembrete: "Lembrete de crediário",
+                cobranca_manual: "Cobrança manual",
+                alerta_admin: "Alerta para a loja",
+              };
+              const rows = history.filter(
+                (r) => statusFilter === "all" || r.status === statusFilter
+              );
+              if (rows.length === 0) {
+                return (
+                  <Card className="border shadow-sm">
+                    <CardContent className="flex h-40 flex-col items-center justify-center gap-2 text-center">
+                      <History className="h-9 w-9 text-muted-foreground/40" />
+                      <p className="text-sm text-muted-foreground">
+                        Nenhum envio {statusFilter !== "all" ? "neste filtro" : "registrado ainda"}.
+                      </p>
+                    </CardContent>
+                  </Card>
+                );
+              }
+              return (
+                <Card className="border shadow-sm">
+                  <CardContent className="divide-y p-0">
+                    {rows.map((r) => (
+                      <div key={r.id} className="flex items-start justify-between gap-3 p-3.5">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-semibold">
+                              {kindLabel[r.kind] || r.kind}
+                            </span>
+                            {r.status === "enviado" ? (
+                              <Badge className="bg-emerald-600 text-white">
+                                <CheckCircle2 className="mr-1 h-3 w-3" /> Enviada
+                              </Badge>
+                            ) : r.status === "falhou" ? (
+                              <Badge className="bg-rose-600 text-white">
+                                <XCircle className="mr-1 h-3 w-3" /> Falhou
+                              </Badge>
+                            ) : (
+                              <Badge className="bg-amber-500 text-white">
+                                <Loader2 className="mr-1 h-3 w-3 animate-spin" /> Em andamento
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                            {r.recipient_name || r.recipient_phone || "—"}
+                            {" · "}
+                            {new Date(r.created_at).toLocaleString("pt-BR", {
+                              day: "2-digit",
+                              month: "2-digit",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </p>
+                          {r.status === "falhou" && r.error && (
+                            <p className="mt-1 flex items-start gap-1 text-[11px] text-rose-600">
+                              <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+                              <span className="break-all">{r.error}</span>
+                            </p>
+                          )}
+                        </div>
+                        <Badge variant="secondary" className="shrink-0 text-[10px]">
+                          {r.channel === "whatsapp" ? "WhatsApp" : "Push"}
+                        </Badge>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              );
+            })()
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

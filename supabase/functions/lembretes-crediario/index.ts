@@ -148,7 +148,7 @@ Deno.serve(async (req) => {
     const { data: insts, error: instErr } = await supabase
       .from("credit_installments")
       .select(
-        "id, installment_number, amount, amount_paid, due_date, status, customer:customers(id, full_name, current_debt, phone), sale:sales(sale_number)"
+        "id, installment_number, amount, amount_paid, due_date, status, sale_id, customer:customers(id, full_name, current_debt, phone), sale:sales(sale_number)"
       )
       .in("status", ["pendente", "atrasado"])
       .or(`due_date.eq.${todayStr},due_date.eq.${tomorrowStr},due_date.lt.${todayStr}`)
@@ -233,9 +233,37 @@ Deno.serve(async (req) => {
               storeName,
               pixKey
             );
+            const logTitle =
+              bucket === "vespera"
+                ? "Lembrete: vence amanhã"
+                : bucket === "hoje"
+                ? "Lembrete: vence hoje"
+                : "Lembrete: parcela atrasada";
+            const { data: nlog } = await supabase
+              .from("notification_log")
+              .insert({
+                channel: "whatsapp",
+                kind: "lembrete",
+                recipient_type: "cliente",
+                customer_id: cust.id,
+                recipient_name: cust.full_name,
+                recipient_phone: number,
+                title: logTitle,
+                body: msg,
+                status: "em_andamento",
+                installment_id: inst.id,
+                sale_id: inst.sale_id ?? null,
+              })
+              .select("id")
+              .single();
             try {
               await sendWhatsAppText(number, msg);
               results.waSent++;
+              if (nlog?.id)
+                await supabase
+                  .from("notification_log")
+                  .update({ status: "enviado" })
+                  .eq("id", nlog.id);
             } catch (e) {
               // libera o log para nova tentativa numa próxima execução do dia
               await supabase
@@ -244,6 +272,14 @@ Deno.serve(async (req) => {
                 .eq("installment_id", inst.id)
                 .eq("bucket", bucket)
                 .eq("sent_on", todayStr);
+              if (nlog?.id)
+                await supabase
+                  .from("notification_log")
+                  .update({
+                    status: "falhou",
+                    error: String((e as Error)?.message || e),
+                  })
+                  .eq("id", nlog.id);
               results.errors.push("wa:" + String((e as Error)?.message || e));
             }
           }
