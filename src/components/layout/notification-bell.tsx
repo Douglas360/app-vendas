@@ -60,7 +60,40 @@ export function NotificationBell() {
       .select("id, title, body, link, is_read, created_at, type, metadata")
       .order("created_at", { ascending: false })
       .limit(30);
-    setItems((data as NotificationRow[]) || []);
+    const list = (data as NotificationRow[]) || [];
+    setItems(list);
+
+    // Sincroniza com o histórico: marca como "enviado" quem já foi cobrado hoje
+    // (por qualquer tela — Cobranças ou o próprio sininho).
+    const instIds = list
+      .map((n) => n.metadata?.installment_id)
+      .filter((v): v is string => !!v);
+    if (instIds.length) {
+      const start = new Date();
+      start.setHours(0, 0, 0, 0);
+      const { data: logs } = await supabase
+        .from("notification_log")
+        .select("installment_id")
+        .in("installment_id", instIds)
+        .eq("kind", "cobranca_manual")
+        .gte("created_at", start.toISOString());
+      const sentInst = new Set(
+        (logs || [])
+          .map((l: { installment_id: string | null }) => l.installment_id)
+          .filter((v: string | null): v is string => !!v)
+      );
+      setSentIds(
+        new Set(
+          list
+            .filter(
+              (n) =>
+                n.metadata?.installment_id &&
+                sentInst.has(n.metadata.installment_id)
+            )
+            .map((n) => n.id)
+        )
+      );
+    }
   }, [supabase, user]);
 
   useEffect(() => {
