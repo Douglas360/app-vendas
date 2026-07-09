@@ -49,6 +49,7 @@ export function NotificationBell() {
 
   const [items, setItems] = useState<NotificationRow[]>([]);
   const [open, setOpen] = useState(false);
+  const [sentIds, setSentIds] = useState<Set<string>>(new Set());
 
   const unread = items.filter((n) => !n.is_read).length;
 
@@ -125,6 +126,25 @@ export function NotificationBell() {
       const url = buildWhatsappLink(cust.phone, msg);
       if (win) win.location.href = url;
       else window.open(url, "_blank");
+
+      // Marca como enviado (histórico) e sinaliza na notificação
+      setSentIds((prev) => new Set(prev).add(n.id));
+      supabase
+        .from("notification_log")
+        .insert({
+          channel: "whatsapp",
+          kind: "cobranca_manual",
+          recipient_type: "cliente",
+          customer_id: n.metadata?.customer_id ?? null,
+          recipient_name: cust.full_name,
+          recipient_phone: cust.phone,
+          title: "Cobrança (via sininho)",
+          body: msg,
+          status: "enviado",
+          installment_id: instId,
+        })
+        .then(() => {});
+
       if (!n.is_read) {
         setItems((prev) =>
           prev.map((x) => (x.id === n.id ? { ...x, is_read: true } : x))
@@ -213,14 +233,26 @@ export function NotificationBell() {
                       {timeAgo(n.created_at)}
                     </p>
                     {n.type === "crediario" && n.metadata?.installment_id && (
-                      <Button
-                        size="sm"
-                        onClick={(e) => handleWhatsappFromNotif(e, n)}
-                        className="mt-2 h-7 bg-emerald-600 px-2.5 text-xs text-white hover:bg-emerald-700"
-                      >
-                        <MessageCircle className="mr-1.5 h-3.5 w-3.5" />
-                        Enviar no WhatsApp
-                      </Button>
+                      <div className="mt-2 flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant={sentIds.has(n.id) ? "outline" : "default"}
+                          onClick={(e) => handleWhatsappFromNotif(e, n)}
+                          className={
+                            sentIds.has(n.id)
+                              ? "h-7 px-2.5 text-xs"
+                              : "h-7 bg-emerald-600 px-2.5 text-xs text-white hover:bg-emerald-700"
+                          }
+                        >
+                          <MessageCircle className="mr-1.5 h-3.5 w-3.5" />
+                          {sentIds.has(n.id) ? "Reenviar" : "Enviar no WhatsApp"}
+                        </Button>
+                        {sentIds.has(n.id) && (
+                          <span className="flex items-center gap-1 text-[11px] font-medium text-emerald-600">
+                            <CheckCheck className="h-3.5 w-3.5" /> Enviado
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
