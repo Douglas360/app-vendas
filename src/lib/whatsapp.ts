@@ -210,55 +210,65 @@ function brl(value: number): string {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
-// Monta o comprovante em texto (formatado para WhatsApp)
+// Monta o comprovante em texto (usa o modelo editável comprovante_venda)
 export function buildWhatsappReceipt(data: ReceiptData): string {
-  const lines: string[] = [];
-  lines.push(`*${data.store.name.toUpperCase()}*`);
-  if (data.store.cnpj) lines.push(`CNPJ: ${data.store.cnpj}`);
-  if (data.store.phone) lines.push(`Tel: ${data.store.phone}`);
-  lines.push("──────────────");
-  lines.push(`🧾 *Comprovante de Venda* #${data.saleNumber}`);
-  lines.push(`📅 ${new Date(data.date).toLocaleString("pt-BR")}`);
-  if (data.customer) lines.push(`👤 ${data.customer}`);
-  lines.push("──────────────");
+  const t = getTemplates();
 
-  data.items.forEach((item) => {
-    lines.push(`• ${item.name}`);
-    lines.push(
-      `   ${item.quantity} ${item.unit} x ${brl(item.unitPrice)} = ${brl(item.total)}`
-    );
-  });
+  const contatoLines: string[] = [];
+  if (data.store.cnpj) contatoLines.push(`CNPJ: ${data.store.cnpj}`);
+  if (data.store.phone) contatoLines.push(`Tel: ${data.store.phone}`);
+  const contato = contatoLines.length ? contatoLines.join("\n") + "\n" : "";
 
-  lines.push("──────────────");
-  lines.push(`Subtotal: ${brl(data.subtotal)}`);
-  if (data.discount > 0) lines.push(`Desconto: -${brl(data.discount)}`);
-  lines.push(`*TOTAL: ${brl(data.total)}*`);
-  lines.push(`Pagamento: ${data.paymentMethodLabel}`);
+  const clienteLinha = data.customer ? `👤 ${data.customer}\n` : "";
 
+  const itens = data.items
+    .map(
+      (item) =>
+        `• ${item.name}\n   ${item.quantity} ${item.unit} x ${brl(item.unitPrice)} = ${brl(item.total)}`
+    )
+    .join("\n");
+
+  const resumoLines: string[] = [];
+  resumoLines.push(`Subtotal: ${brl(data.subtotal)}`);
+  if (data.discount > 0) resumoLines.push(`Desconto: -${brl(data.discount)}`);
+  resumoLines.push(`*TOTAL: ${brl(data.total)}*`);
+  resumoLines.push(`Pagamento: ${data.paymentMethodLabel}`);
   if (data.cashReceived !== undefined) {
-    lines.push(`Recebido: ${brl(data.cashReceived)}`);
-    lines.push(`Troco: ${brl(data.change ?? 0)}`);
+    resumoLines.push(`Recebido: ${brl(data.cashReceived)}`);
+    resumoLines.push(`Troco: ${brl(data.change ?? 0)}`);
   }
+  const resumo = resumoLines.join("\n");
 
+  let parcelas = "";
   if (data.installments && data.installments.length > 0) {
-    lines.push("");
-    lines.push("*Parcelas (crediário):*");
+    const pl: string[] = ["", "*Parcelas (crediário):*"];
     data.installments.forEach((inst) => {
       const due = new Date(inst.dueDate + "T00:00:00").toLocaleDateString("pt-BR");
-      lines.push(`   ${inst.number}ª · venc. ${due} · ${brl(inst.amount)}`);
+      pl.push(`   ${inst.number}ª · venc. ${due} · ${brl(inst.amount)}`);
     });
     if (data.store.pixKey) {
-      lines.push("");
-      lines.push(`💳 *Pague as parcelas via PIX:* ${data.store.pixKey}`);
-      lines.push("Após o pagamento, envie o comprovante por aqui.");
+      pl.push("");
+      pl.push(`💳 *Pague as parcelas via PIX:* ${data.store.pixKey}`);
+      pl.push("Após o pagamento, envie o comprovante por aqui.");
     }
+    parcelas = pl.join("\n") + "\n";
   }
 
-  lines.push("──────────────");
-  if (data.store.footer) lines.push(data.store.footer);
-  lines.push("_Documento sem valor fiscal_");
+  const rodape = data.store.footer ? `${data.store.footer}\n` : "";
 
-  return lines.join("\n");
+  return applyTemplate(t.comprovante_venda, {
+    loja: data.store.name.toUpperCase(),
+    contato,
+    numero: String(data.saleNumber),
+    data: new Date(data.date).toLocaleString("pt-BR"),
+    cliente: data.customer || "",
+    cliente_linha: clienteLinha,
+    itens,
+    resumo,
+    parcelas,
+    rodape,
+    pix: data.store.pixKey || "",
+  });
 }
 
 // Posta uma imagem no Status (Stories) do WhatsApp conectado.
@@ -368,6 +378,7 @@ export interface MessageTemplates {
   lembrete_hoje: string;
   lembrete_atraso: string;
   confirmacao_pagamento: string;
+  comprovante_venda: string;
 }
 
 export const DEFAULT_TEMPLATES: MessageTemplates = {
@@ -391,6 +402,11 @@ export const DEFAULT_TEMPLATES: MessageTemplates = {
     "Olá {primeiro_nome}, confirmamos o recebimento de *{valor_pago}*.\n" +
     "Parcela {parcela}ª · venda #{venda}\n" +
     "{status_parcela}\n\n{saldo_linha}",
+  comprovante_venda:
+    "*{loja}*\n{contato}──────────────\n" +
+    "🧾 *Comprovante de Venda* #{numero}\n📅 {data}\n{cliente_linha}──────────────\n" +
+    "{itens}\n──────────────\n{resumo}\n{parcelas}──────────────\n" +
+    "{rodape}_Documento sem valor fiscal_",
 };
 
 const TEMPLATES_KEY = "app_vendas_msg_templates";

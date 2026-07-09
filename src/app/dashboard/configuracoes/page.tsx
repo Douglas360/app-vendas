@@ -281,6 +281,28 @@ export default function ConfiguracoesPage() {
     });
   }
 
+  function previewReceipt(): string {
+    const pix = store.pixKey || "(sua chave PIX)";
+    return applyTemplate(templates.comprovante_venda, {
+      loja: (store.name || "Sua Loja").toUpperCase(),
+      contato:
+        (store.cnpj ? `CNPJ: ${store.cnpj}\n` : "") +
+        (store.phone ? `Tel: ${store.phone}\n` : ""),
+      numero: "34",
+      data: new Date().toLocaleString("pt-BR"),
+      cliente: "Maria Silva",
+      cliente_linha: "👤 Maria Silva\n",
+      itens:
+        "• BLUSA MOLETOM URSO\n   1 un x R$ 99,90 = R$ 99,90",
+      resumo:
+        "Subtotal: R$ 99,90\n*TOTAL: R$ 99,90*\nPagamento: Crediário",
+      parcelas:
+        `\n*Parcelas (crediário):*\n   1ª · venc. 08/08/2026 · R$ 99,90\n\n💳 *Pague as parcelas via PIX:* ${pix}\nApós o pagamento, envie o comprovante por aqui.\n`,
+      rodape: (store.footer || "Obrigado pela preferência! Volte sempre.") + "\n",
+      pix,
+    });
+  }
+
   async function handleToggleWaReminders(value: boolean) {
     setWaReminders(value);
     await supabase
@@ -926,10 +948,28 @@ export default function ConfiguracoesPage() {
               </div>
             ))}
 
-            <div className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
-              <span className="font-semibold text-foreground">Comprovante de venda:</span> o corpo
-              (itens, valores) é montado automaticamente. Para mudar a mensagem final do recibo,
-              edite o <span className="font-medium">rodapé</span> em &ldquo;Dados da Loja&rdquo; acima.
+            <div className="space-y-1.5 border-t pt-4">
+              <label className="text-sm font-semibold">Comprovante de venda (Nova Venda)</label>
+              <p className="text-xs text-muted-foreground">
+                Enviado ao finalizar a venda. Os blocos automáticos entram pelas variáveis:{" "}
+                <code>{"{loja}"}</code>, <code>{"{contato}"}</code>, <code>{"{numero}"}</code>,{" "}
+                <code>{"{data}"}</code>, <code>{"{cliente_linha}"}</code>, <code>{"{itens}"}</code>,{" "}
+                <code>{"{resumo}"}</code>, <code>{"{parcelas}"}</code>, <code>{"{rodape}"}</code>,{" "}
+                <code>{"{pix}"}</code>. (Itens e valores são preenchidos automaticamente.)
+              </p>
+              <Textarea
+                value={templates.comprovante_venda}
+                onChange={(e) =>
+                  setTemplates((prev) => ({ ...prev, comprovante_venda: e.target.value }))
+                }
+                className="min-h-40 font-mono text-xs"
+              />
+              <details className="text-xs text-muted-foreground">
+                <summary className="cursor-pointer select-none">Ver prévia</summary>
+                <pre className="mt-1 whitespace-pre-wrap rounded-md bg-muted/50 p-2 text-[11px]">
+                  {previewReceipt()}
+                </pre>
+              </details>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
