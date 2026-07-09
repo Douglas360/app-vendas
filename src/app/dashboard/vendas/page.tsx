@@ -452,8 +452,8 @@ export default function VendasPage() {
 
       {/* Sale Details Dialog */}
       <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
+        <DialogContent className="max-w-lg max-h-[90vh] flex flex-col">
+          <DialogHeader className="shrink-0">
             <DialogTitle>Ficha da Venda #{selectedSale?.sale_number}</DialogTitle>
             <DialogDescription>
               Detalhamento de produtos vendidos, descontos aplicados e pagamentos.
@@ -461,7 +461,7 @@ export default function VendasPage() {
           </DialogHeader>
 
           {selectedSale && (
-            <div className="space-y-4 pt-2">
+            <div className="flex-1 space-y-4 overflow-y-auto pt-2 pr-1">
               {/* Status Header */}
               <div className="flex items-center justify-between p-3 rounded-xl border bg-muted/40 text-sm">
                 <div>
@@ -555,7 +555,13 @@ export default function VendasPage() {
                   {selectedSale.payments?.map((pay) => (
                     <div key={pay.id} className="flex justify-between items-center text-xs border p-2.5 rounded-lg bg-muted/20">
                       <div>
-                        <span className="font-semibold capitalize text-foreground">{pay.method.replace("_", " ")}</span>
+                        <span className="font-semibold capitalize text-foreground">
+                          {pay.method === "fiado"
+                            ? "Crediário"
+                            : pay.method === "pix"
+                            ? "PIX"
+                            : pay.method.replace("_", " ")}
+                        </span>
                         {pay.installments > 1 && <span className="text-muted-foreground ml-1.5">({pay.installments}x)</span>}
                       </div>
                       <div className="flex items-center gap-2">
@@ -584,7 +590,7 @@ export default function VendasPage() {
             </div>
           )}
 
-          <DialogFooter className="pt-4 border-t flex flex-row items-center gap-2 sm:justify-between">
+          <DialogFooter className="shrink-0 border-t pt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             {selectedSale && selectedSale.status === "finalizada" ? (
               <Button
                 variant="destructive"
