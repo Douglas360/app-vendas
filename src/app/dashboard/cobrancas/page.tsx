@@ -6,6 +6,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import {
   CalendarClock,
   Loader2,
   RefreshCw,
@@ -40,26 +48,72 @@ function ymd(offsetDays: number): string {
   return `${y}-${m}-${dd}`;
 }
 
+function monthRange(offsetMonths: number): { from: string; to: string } {
+  const base = new Date();
+  const first = new Date(base.getFullYear(), base.getMonth() + offsetMonths, 1);
+  const last = new Date(base.getFullYear(), base.getMonth() + offsetMonths + 1, 0);
+  const fmt = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+      d.getDate()
+    ).padStart(2, "0")}`;
+  return { from: fmt(first), to: fmt(last) };
+}
+
+function monthLabelFromYm(ym: string): string {
+  const [y, m] = ym.split("-").map(Number);
+  const d = new Date(y, m - 1, 1);
+  const s = d.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+type Period = "proximos" | "mes_atual" | "mes_seguinte" | "custom";
+
 export default function CobrancasPage() {
   const supabase = createClient();
   const [rows, setRows] = useState<Row[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [sentIds, setSentIds] = useState<Set<string>>(new Set());
+  const [period, setPeriod] = useState<Period>("proximos");
+  const [customMonth, setCustomMonth] = useState<string>(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
 
   const todayStr = ymd(0);
   const tomorrowStr = ymd(1);
 
+  const range = useMemo(() => {
+    if (period === "mes_atual") return monthRange(0);
+    if (period === "mes_seguinte") return monthRange(1);
+    if (period === "custom") {
+      const [y, m] = customMonth.split("-").map(Number);
+      const first = new Date(y, m - 1, 1);
+      const last = new Date(y, m, 0);
+      const fmt = (d: Date) =>
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+          d.getDate()
+        ).padStart(2, "0")}`;
+      return { from: fmt(first), to: fmt(last) };
+    }
+    return null; // proximos: usa lte tomorrow
+  }, [period, customMonth]);
+
   const load = useCallback(async () => {
     setIsLoading(true);
     try {
-      const { data } = await supabase
+      let query = supabase
         .from("credit_installments")
         .select(
           "id, amount, amount_paid, due_date, installment_number, customer:customers(id, full_name, phone), sale:sales(sale_number)"
         )
         .in("status", ["pendente", "atrasado"])
-        .lte("due_date", tomorrowStr)
         .order("due_date", { ascending: true });
+      if (range) {
+        query = query.gte("due_date", range.from).lte("due_date", range.to);
+      } else {
+        query = query.lte("due_date", tomorrowStr);
+      }
+      const { data } = await query;
       const list = ((data as unknown as Row[]) || []).filter(
         (r) => Number(r.amount) - Number(r.amount_paid) > 0.001
       );
@@ -89,7 +143,7 @@ export default function CobrancasPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [supabase, tomorrowStr]);
+  }, [supabase, tomorrowStr, range]);
 
   useEffect(() => {
     load();
@@ -106,6 +160,16 @@ export default function CobrancasPage() {
     }
     return { atrasadas, hoje, amanha };
   }, [rows, todayStr]);
+
+  const totals = useMemo(() => {
+    let receber = 0;
+    let pago = 0;
+    for (const r of rows) {
+      receber += Number(r.amount) - Number(r.amount_paid);
+      pago += Number(r.amount_paid);
+    }
+    return { count: rows.length, receber, pago };
+  }, [rows]);
 
   function messageFor(r: Row): string {
     return buildCollectionMessage({
@@ -250,10 +314,10 @@ export default function CobrancasPage() {
         <div>
           <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight">
             <CalendarClock className="h-7 w-7 text-indigo-600" />
-            Cobranças do dia
+            Cobranças
           </h1>
           <p className="mt-1 text-muted-foreground">
-            Parcelas que vencem amanhã, vencem hoje ou estão atrasadas. Toque em WhatsApp para enviar a cobrança pronta.
+            Veja as parcelas por período e envie a cobrança pronta pelo WhatsApp.
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={load} disabled={isLoading}>
@@ -261,6 +325,55 @@ export default function CobrancasPage() {
           Atualizar
         </Button>
       </div>
+
+      {/* Filtro de período */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="w-full sm:w-64">
+          <Select value={period} onValueChange={(v) => setPeriod(v as Period)}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="proximos">Vencimentos próximos (atrasadas, hoje, amanhã)</SelectItem>
+              <SelectItem value="mes_atual">Este mês</SelectItem>
+              <SelectItem value="mes_seguinte">Mês que vem</SelectItem>
+              <SelectItem value="custom">Escolher mês…</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {period === "custom" && (
+          <Input
+            type="month"
+            value={customMonth}
+            onChange={(e) => setCustomMonth(e.target.value)}
+            className="w-full sm:w-44"
+          />
+        )}
+      </div>
+
+      {/* Resumo do período */}
+      {!isLoading && total > 0 && (
+        <div className="grid grid-cols-3 gap-3">
+          <Card className="border shadow-sm">
+            <CardContent className="p-3">
+              <p className="text-xs text-muted-foreground">Parcelas</p>
+              <p className="text-lg font-bold">{totals.count}</p>
+            </CardContent>
+          </Card>
+          <Card className="border shadow-sm">
+            <CardContent className="p-3">
+              <p className="text-xs text-muted-foreground">A receber</p>
+              <p className="text-lg font-bold text-rose-600">{brl(totals.receber)}</p>
+            </CardContent>
+          </Card>
+          <Card className="border shadow-sm">
+            <CardContent className="p-3">
+              <p className="text-xs text-muted-foreground">Já pago</p>
+              <p className="text-lg font-bold text-emerald-600">{brl(totals.pago)}</p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="flex h-60 flex-col items-center justify-center gap-2">
@@ -271,18 +384,26 @@ export default function CobrancasPage() {
         <Card className="border shadow-sm">
           <CardContent className="flex h-48 flex-col items-center justify-center gap-2 text-center">
             <CheckCircle2 className="h-10 w-10 text-emerald-500" />
-            <h3 className="font-semibold">Tudo em dia!</h3>
+            <h3 className="font-semibold">Nada por aqui</h3>
             <p className="max-w-sm text-sm text-muted-foreground">
-              Nenhuma parcela vencendo amanhã, hoje ou em atraso no momento.
+              {period === "proximos"
+                ? "Nenhuma parcela vencendo amanhã, hoje ou em atraso no momento."
+                : "Nenhuma parcela em aberto neste período."}
             </p>
           </CardContent>
         </Card>
-      ) : (
+      ) : period === "proximos" ? (
         <>
           {renderSection("Atrasadas", groups.atrasadas, "rose")}
           {renderSection("Vencem hoje", groups.hoje, "amber")}
           {renderSection("Vencem amanhã", groups.amanha, "indigo")}
         </>
+      ) : (
+        renderSection(
+          range ? monthLabelFromYm(range.from.slice(0, 7)) : "Parcelas",
+          rows,
+          "indigo"
+        )
       )}
     </div>
   );
