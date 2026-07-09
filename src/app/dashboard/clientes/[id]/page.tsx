@@ -14,10 +14,9 @@ import type {
 import { getStoreInfo, type ReceiptData } from "@/lib/receipt";
 import {
   sendReceiptToWhatsapp,
-  sendCustomerMessage,
-  sendPaymentConfirmation,
   buildPaymentMessage,
   buildCollectionMessage,
+  buildWhatsappLink,
 } from "@/lib/whatsapp";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -66,6 +65,7 @@ import {
   MapPin,
   Plus,
   MessageCircle,
+  Copy,
   Receipt,
   Pencil,
   XCircle,
@@ -597,42 +597,44 @@ export default function ClienteDetalhePage() {
     setIsPaymentOpen(true);
   }
 
-  // Cobrança manual da parcela via WhatsApp
-  const [chargingId, setChargingId] = useState<string | null>(null);
-  async function handleChargeInstallment(inst: InstallmentRow) {
+  // Cobrança manual da parcela: abre o WhatsApp do cliente com a mensagem pronta
+  const [waPrompt, setWaPrompt] = useState<{
+    phone: string;
+    message: string;
+    title: string;
+  } | null>(null);
+
+  function handleChargeInstallment(inst: InstallmentRow) {
     if (!customer?.phone) {
       toast.error("Cliente sem telefone", {
         description: "Cadastre o telefone do cliente para enviar a cobrança.",
       });
       return;
     }
-    setChargingId(inst.id);
+    const msg = buildCollectionMessage({
+      customerName: customer.full_name,
+      remaining: inst.amount - inst.amount_paid,
+      dueDate: inst.due_date,
+    });
+    setWaPrompt({
+      phone: customer.phone,
+      message: msg,
+      title: `Cobrança · ${inst.installment_number}ª parcela`,
+    });
+  }
+
+  function openWaPrompt() {
+    if (!waPrompt) return;
+    window.open(buildWhatsappLink(waPrompt.phone, waPrompt.message), "_blank");
+  }
+
+  async function copyWaPrompt() {
+    if (!waPrompt) return;
     try {
-      const msg = buildCollectionMessage({
-        customerName: customer.full_name,
-        remaining: inst.amount - inst.amount_paid,
-        dueDate: inst.due_date,
-      });
-      const sent = await sendCustomerMessage(supabase, customer.phone, msg, {
-        kind: "cobranca_manual",
-        recipientType: "cliente",
-        customerId: customer.id,
-        recipientName: customer.full_name,
-        installmentId: inst.id,
-        saleId: (inst as { sale_id?: string }).sale_id ?? null,
-      });
-      if (sent) {
-        toast.success("Cobrança enviada no WhatsApp!");
-      } else {
-        toast.error("WhatsApp não conectado.", {
-          description: "Conecte em Configurações para enviar cobranças.",
-        });
-      }
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Tente novamente.";
-      toast.error("Falha ao enviar cobrança", { description: message });
-    } finally {
-      setChargingId(null);
+      await navigator.clipboard.writeText(waPrompt.message);
+      toast.success("Mensagem copiada!");
+    } catch {
+      toast.error("Não foi possível copiar a mensagem.");
     }
   }
 
@@ -665,7 +667,7 @@ export default function ClienteDetalhePage() {
       toast.success("Pagamento registrado com sucesso!");
       setIsPaymentOpen(false);
 
-      // Envia confirmação no WhatsApp do cliente
+      // Monta a confirmação e abre o WhatsApp do cliente com a mensagem pronta
       if (customer?.phone) {
         try {
           const updated = Array.isArray(updatedRaw) ? updatedRaw[0] : updatedRaw;
@@ -686,15 +688,11 @@ export default function ClienteDetalhePage() {
             installmentPaid: remainingNow <= 0.001,
             totalDebt: Number(custData?.current_debt ?? 0),
           });
-          const sent = await sendPaymentConfirmation(supabase, customer.phone, msg, {
-            kind: "confirmacao_pagamento",
-            recipientType: "cliente",
-            customerId: customer.id,
-            recipientName: customer.full_name,
-            installmentId: inst.id,
-            saleId: (inst as { sale_id?: string }).sale_id ?? null,
+          setWaPrompt({
+            phone: customer.phone,
+            message: msg,
+            title: "Confirmação de pagamento",
           });
-          if (sent) toast.success("Confirmação enviada no WhatsApp do cliente!");
         } catch (e) {
           console.error(e);
         }
@@ -1213,15 +1211,10 @@ export default function ClienteDetalhePage() {
                                       size="icon"
                                       variant="ghost"
                                       onClick={() => handleChargeInstallment(inst)}
-                                      disabled={chargingId === inst.id}
                                       title="Cobrar no WhatsApp"
                                       className="h-7 w-7 text-emerald-600 hover:bg-emerald-500/10"
                                     >
-                                      {chargingId === inst.id ? (
-                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                      ) : (
-                                        <MessageCircle className="h-3.5 w-3.5" />
-                                      )}
+                                      <MessageCircle className="h-3.5 w-3.5" />
                                     </Button>
                                     <Button
                                       size="sm"
@@ -1900,6 +1893,36 @@ export default function ClienteDetalhePage() {
               </DialogFooter>
             </form>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Diálogo: enviar mensagem pelo WhatsApp (link manual) */}
+      <Dialog open={!!waPrompt} onOpenChange={(o) => !o && setWaPrompt(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{waPrompt?.title || "Enviar no WhatsApp"}</DialogTitle>
+            <DialogDescription>
+              Revise a mensagem e toque em &ldquo;Abrir WhatsApp&rdquo; para enviar ao cliente.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            readOnly
+            value={waPrompt?.message || ""}
+            className="h-48 text-sm"
+          />
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
+            <Button variant="outline" onClick={copyWaPrompt} className="w-full sm:w-auto">
+              <Copy className="mr-2 h-4 w-4" />
+              Copiar
+            </Button>
+            <Button
+              onClick={openWaPrompt}
+              className="w-full bg-emerald-600 text-white hover:bg-emerald-700 sm:w-auto"
+            >
+              <MessageCircle className="mr-2 h-4 w-4" />
+              Abrir WhatsApp
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

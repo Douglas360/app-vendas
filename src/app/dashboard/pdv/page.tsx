@@ -50,6 +50,8 @@ import {
   Clock,
   Save,
   ScanLine,
+  MessageCircle,
+  Copy,
 } from "lucide-react";
 import { BarcodeScanner } from "@/components/pdv/barcode-scanner";
 import { toast } from "sonner";
@@ -59,7 +61,11 @@ import {
   isAutoPrintReceiptEnabled,
   type ReceiptData,
 } from "@/lib/receipt";
-import { sendReceiptToWhatsapp } from "@/lib/whatsapp";
+import {
+  sendReceiptToWhatsapp,
+  buildWhatsappLink,
+  buildWhatsappReceipt,
+} from "@/lib/whatsapp";
 
 const PAYMENT_LABELS: Record<string, string> = {
   dinheiro: "Dinheiro",
@@ -129,6 +135,7 @@ export default function PDVPage() {
   const [saleFinishedSuccess, setSaleFinishedSuccess] = useState(false);
   const [latestSaleNumber, setLatestSaleNumber] = useState<number | null>(null);
   const [lastReceipt, setLastReceipt] = useState<ReceiptData | null>(null);
+  const [lastWaPhone, setLastWaPhone] = useState<string | null>(null);
 
   // Fluxo guiado no celular (1=Cliente, 2=Produtos, 3=Pagamento, 4=Revisar)
   const [mobileStep, setMobileStep] = useState(1);
@@ -722,6 +729,7 @@ export default function PDVPage() {
             : undefined,
       };
       setLastReceipt(receipt);
+      setLastWaPhone(selectedCustomer?.phone || null);
 
       setLatestSaleNumber(updatedSale.sale_number);
       setSaleFinishedSuccess(true);
@@ -761,6 +769,23 @@ export default function PDVPage() {
       setIsFinishing(false);
     }
   };
+
+  // Abre o WhatsApp do cliente com o comprovante pronto (envio manual)
+  function openWhatsappReceipt() {
+    if (!lastReceipt || !lastWaPhone) return;
+    const url = buildWhatsappLink(lastWaPhone, buildWhatsappReceipt(lastReceipt));
+    window.open(url, "_blank");
+  }
+
+  async function copyWhatsappReceipt() {
+    if (!lastReceipt) return;
+    try {
+      await navigator.clipboard.writeText(buildWhatsappReceipt(lastReceipt));
+      toast.success("Mensagem copiada!");
+    } catch {
+      toast.error("Não foi possível copiar a mensagem.");
+    }
+  }
 
   // Change Calculator for Cash Payment
   const changeValue = parseFloat(cashReceived) - grandTotal;
@@ -817,6 +842,21 @@ export default function PDVPage() {
                 <Printer className="mr-2 h-4 w-4" />
                 Imprimir Recibo
               </Button>
+              {lastWaPhone && (
+                <>
+                  <Button
+                    onClick={openWhatsappReceipt}
+                    className="w-full bg-emerald-600 text-white hover:bg-emerald-700"
+                  >
+                    <MessageCircle className="mr-2 h-4 w-4" />
+                    Enviar no WhatsApp
+                  </Button>
+                  <Button variant="outline" onClick={copyWhatsappReceipt} className="w-full">
+                    <Copy className="mr-2 h-4 w-4" />
+                    Copiar mensagem
+                  </Button>
+                </>
+              )}
               <Button
                 onClick={() => {
                   setSaleFinishedSuccess(false);
@@ -1991,6 +2031,21 @@ export default function PDVPage() {
                   <Printer className="mr-2 h-4 w-4" />
                   Imprimir Recibo
                 </Button>
+                {lastWaPhone && (
+                  <>
+                    <Button
+                      onClick={openWhatsappReceipt}
+                      className="w-full bg-emerald-600 text-white hover:bg-emerald-700"
+                    >
+                      <MessageCircle className="mr-2 h-4 w-4" />
+                      Enviar no WhatsApp
+                    </Button>
+                    <Button variant="outline" onClick={copyWhatsappReceipt} className="w-full">
+                      <Copy className="mr-2 h-4 w-4" />
+                      Copiar mensagem
+                    </Button>
+                  </>
+                )}
                 <Button onClick={() => setIsCheckoutOpen(false)} className="bg-indigo-600 hover:bg-indigo-700 text-white w-full">
                   Nova Venda
                 </Button>

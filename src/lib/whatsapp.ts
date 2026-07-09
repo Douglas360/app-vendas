@@ -172,6 +172,13 @@ export async function disconnectWhatsapp(cfg: EvolutionConfig): Promise<void> {
   await evoFetch(cfg, `/instance/logout/${encodeURIComponent(cfg.instance)}`, "DELETE");
 }
 
+// Gera um link "clique para enviar" (wa.me) com a mensagem pré-preenchida.
+// Abre a conversa do cliente no WhatsApp para envio manual (sem depender da API).
+export function buildWhatsappLink(phone: string, text: string): string {
+  const number = normalizePhone(phone);
+  return `https://wa.me/${number}?text=${encodeURIComponent(text)}`;
+}
+
 // Normaliza o telefone para o formato do WhatsApp (DDI + DDD + número)
 export function normalizePhone(phone: string): string {
   const digits = phone.replace(/\D/g, "");
