@@ -384,7 +384,8 @@ export function buildPaymentMessage(input: PaymentMessageInput): string {
   return lines.join("\n");
 }
 
-// Monta a mensagem de cobrança de parcela (tom profissional, com PIX)
+// Monta a mensagem de cobrança de parcela — IDÊNTICA ao lembrete automático
+// enviado às 9h (mesma redação, com PIX e assinatura da loja).
 export function buildCollectionMessage(input: {
   customerName: string;
   remaining: number;
@@ -398,32 +399,41 @@ export function buildCollectionMessage(input: {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const diffDays = Math.round((due.getTime() - today.getTime()) / 86400000);
+  const overdue = diffDays < 0;
+  const val = brl(input.remaining);
 
   const lines: string[] = [];
   lines.push(`Olá, ${firstName}.`);
   lines.push("");
-  if (diffDays < 0) {
-    lines.push(
-      `Consta em aberto a parcela de *${brl(input.remaining)}*, vencida em *${dueStr}*.`
-    );
-    lines.push("Para regularizar, efetue o pagamento via PIX:");
+  if (overdue) {
+    lines.push(`Consta em aberto a parcela de *${val}*, vencida em *${dueStr}*.`);
   } else if (diffDays === 0) {
-    lines.push(`A parcela de *${brl(input.remaining)}* vence *hoje (${dueStr})*.`);
-    lines.push("Você pode efetuar o pagamento via PIX:");
+    lines.push(`A parcela de *${val}* referente à sua compra vence *hoje (${dueStr})*.`);
+  } else if (diffDays === 1) {
+    lines.push(
+      `Lembrete: a parcela de *${val}* referente à sua compra vence *amanhã (${dueStr})*.`
+    );
   } else {
     lines.push(
-      `Lembrete: a parcela de *${brl(input.remaining)}* vence em *${dueStr}*.`
+      `Lembrete: a parcela de *${val}* referente à sua compra vence em *${dueStr}*.`
     );
-    lines.push("Você pode efetuar o pagamento via PIX:");
   }
+  lines.push("");
   if (store.pixKey) {
-    lines.push(`Chave PIX: *${store.pixKey}*`);
+    lines.push(
+      overdue
+        ? `Para regularizar, efetue o pagamento via PIX na chave *${store.pixKey}* e envie o comprovante por aqui.`
+        : `Você pode efetuar o pagamento via PIX na chave *${store.pixKey}*. Após o pagamento, envie o comprovante por aqui.`
+    );
+  } else {
+    lines.push("Para efetuar o pagamento ou tirar dúvidas, entre em contato por aqui.");
   }
   lines.push("");
-  lines.push("Após o pagamento, envie o comprovante por aqui.");
-  lines.push("Caso já tenha efetuado o pagamento, desconsidere esta mensagem.");
-  lines.push("");
-  lines.push(store.name);
+  lines.push("Caso o pagamento já tenha sido efetuado, desconsidere esta mensagem.");
+  if (store.name) {
+    lines.push("");
+    lines.push(store.name);
+  }
   return lines.join("\n");
 }
 
