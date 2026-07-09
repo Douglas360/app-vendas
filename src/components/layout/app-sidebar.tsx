@@ -29,6 +29,7 @@ import {
   Store,
   Wallet,
   Bell,
+  CalendarClock,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useState } from "react";
@@ -63,6 +64,11 @@ const NAV_ITEMS = [
     title: "Crediário",
     href: "/dashboard/fiado",
     icon: CreditCard,
+  },
+  {
+    title: "Cobranças",
+    href: "/dashboard/cobrancas",
+    icon: CalendarClock,
   },
   {
     title: "Caixa",

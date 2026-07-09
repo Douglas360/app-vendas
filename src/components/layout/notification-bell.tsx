@@ -12,7 +12,9 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Bell, CheckCheck, CreditCard } from "lucide-react";
+import { Bell, CheckCheck, CreditCard, MessageCircle } from "lucide-react";
+import { toast } from "sonner";
+import { buildCollectionMessage, buildWhatsappLink } from "@/lib/whatsapp";
 
 interface NotificationRow {
   id: string;
@@ -22,6 +24,11 @@ interface NotificationRow {
   is_read: boolean;
   created_at: string;
   type: string | null;
+  metadata: {
+    installment_id?: string;
+    customer_id?: string;
+    bucket?: string;
+  } | null;
 }
 
 function timeAgo(dateStr: string): string {
@@ -49,7 +56,7 @@ export function NotificationBell() {
     if (!user) return;
     const { data } = await supabase
       .from("notifications")
-      .select("id, title, body, link, is_read, created_at, type")
+      .select("id, title, body, link, is_read, created_at, type, metadata")
       .order("created_at", { ascending: false })
       .limit(30);
     setItems((data as NotificationRow[]) || []);
@@ -84,6 +91,50 @@ export function NotificationBell() {
     }
     setOpen(false);
     if (n.link) router.push(n.link);
+  }
+
+  // Abre o WhatsApp do cliente com a mesma mensagem do lembrete, direto da notificação
+  async function handleWhatsappFromNotif(
+    e: React.MouseEvent,
+    n: NotificationRow
+  ) {
+    e.stopPropagation();
+    const instId = n.metadata?.installment_id;
+    if (!instId) return;
+    // Abre a aba já no gesto do clique (evita bloqueio de pop-up) e ajusta a URL depois
+    const win = window.open("", "_blank");
+    try {
+      const { data: inst } = await supabase
+        .from("credit_installments")
+        .select("amount, amount_paid, due_date, customer:customers(full_name, phone)")
+        .eq("id", instId)
+        .single();
+      const cust = (inst as { customer?: { full_name: string; phone: string | null } } | null)
+        ?.customer;
+      if (!inst || !cust?.phone) {
+        win?.close();
+        toast.error("Cliente sem telefone cadastrado.");
+        return;
+      }
+      const remaining = Number(inst.amount) - Number(inst.amount_paid);
+      const msg = buildCollectionMessage({
+        customerName: cust.full_name,
+        remaining,
+        dueDate: inst.due_date as string,
+      });
+      const url = buildWhatsappLink(cust.phone, msg);
+      if (win) win.location.href = url;
+      else window.open(url, "_blank");
+      if (!n.is_read) {
+        setItems((prev) =>
+          prev.map((x) => (x.id === n.id ? { ...x, is_read: true } : x))
+        );
+        supabase.from("notifications").update({ is_read: true }).eq("id", n.id);
+      }
+    } catch {
+      win?.close();
+      toast.error("Não foi possível abrir o WhatsApp.");
+    }
   }
 
   if (!user) return null;
@@ -132,8 +183,10 @@ export function NotificationBell() {
           <ScrollArea className="max-h-96">
             <div className="divide-y">
               {items.map((n) => (
-                <button
+                <div
                   key={n.id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => handleClick(n)}
                   className={`flex w-full items-start gap-3 p-3 text-left transition-colors hover:bg-muted/40 ${
                     n.is_read ? "" : "bg-indigo-500/5"
@@ -159,8 +212,18 @@ export function NotificationBell() {
                     <p className="mt-0.5 text-[10px] text-muted-foreground/70">
                       {timeAgo(n.created_at)}
                     </p>
+                    {n.type === "crediario" && n.metadata?.installment_id && (
+                      <Button
+                        size="sm"
+                        onClick={(e) => handleWhatsappFromNotif(e, n)}
+                        className="mt-2 h-7 bg-emerald-600 px-2.5 text-xs text-white hover:bg-emerald-700"
+                      >
+                        <MessageCircle className="mr-1.5 h-3.5 w-3.5" />
+                        Enviar no WhatsApp
+                      </Button>
+                    )}
                   </div>
-                </button>
+                </div>
               ))}
             </div>
           </ScrollArea>
