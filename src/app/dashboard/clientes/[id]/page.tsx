@@ -876,25 +876,25 @@ export default function ClienteDetalhePage() {
 
       {/* Tabs */}
       <Tabs defaultValue="compras" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="compras">
+        <TabsList className="flex w-full justify-start overflow-x-auto">
+          <TabsTrigger value="compras" className="shrink-0 whitespace-nowrap">
             <Receipt className="mr-1.5 h-4 w-4" />
             Compras
           </TabsTrigger>
-          <TabsTrigger value="fiado">
+          <TabsTrigger value="fiado" className="shrink-0 whitespace-nowrap">
             <CreditCard className="mr-1.5 h-4 w-4" />
-            Crediário / Parcelas
+            Crediário
             {pendingInstallments.length > 0 && (
               <Badge className="ml-2 h-5 px-1.5 bg-rose-500 text-white">
                 {pendingInstallments.length}
               </Badge>
             )}
           </TabsTrigger>
-          <TabsTrigger value="pagamentos">
+          <TabsTrigger value="pagamentos" className="shrink-0 whitespace-nowrap">
             <Wallet className="mr-1.5 h-4 w-4" />
             Pagamentos
           </TabsTrigger>
-          <TabsTrigger value="dados">
+          <TabsTrigger value="dados" className="shrink-0 whitespace-nowrap">
             <Phone className="mr-1.5 h-4 w-4" />
             Dados
           </TabsTrigger>
