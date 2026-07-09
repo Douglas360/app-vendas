@@ -29,48 +29,57 @@ function normalizePhone(phone: string): string {
   return digits;
 }
 
-// Mensagem profissional para o cliente conforme o vencimento
+// Modelos padrão (iguais aos do app). Sobrescritos por app_settings.message_templates.
+const DEFAULT_TEMPLATES: Record<string, string> = {
+  lembrete_vespera:
+    "Olá, {primeiro_nome}.\n\n" +
+    "Lembrete: a parcela de *{valor}* referente à sua compra vence *amanhã ({vencimento})*.\n\n" +
+    "Você pode efetuar o pagamento via PIX na chave *{pix}*. Após o pagamento, envie o comprovante por aqui.\n\n" +
+    "Caso o pagamento já tenha sido efetuado, desconsidere esta mensagem.\n\n{loja}",
+  lembrete_hoje:
+    "Olá, {primeiro_nome}.\n\n" +
+    "A parcela de *{valor}* referente à sua compra vence *hoje ({vencimento})*.\n\n" +
+    "Você pode efetuar o pagamento via PIX na chave *{pix}*. Após o pagamento, envie o comprovante por aqui.\n\n" +
+    "Caso o pagamento já tenha sido efetuado, desconsidere esta mensagem.\n\n{loja}",
+  lembrete_atraso:
+    "Olá, {primeiro_nome}.\n\n" +
+    "Consta em aberto a parcela de *{valor}*, vencida em *{vencimento}*.\n\n" +
+    "Para regularizar, efetue o pagamento via PIX na chave *{pix}* e envie o comprovante por aqui.\n\n" +
+    "Caso o pagamento já tenha sido efetuado, desconsidere esta mensagem.\n\n{loja}",
+};
+
+function applyTemplate(tpl: string, vars: Record<string, string>): string {
+  return tpl
+    .replace(/\{(\w+)\}/g, (_m, k: string) => (k in vars ? vars[k] : `{${k}}`))
+    .trim();
+}
+
+// Mensagem para o cliente conforme o vencimento (usa os modelos editáveis)
 function buildCustomerMessage(
   bucket: string,
   firstName: string,
+  fullName: string,
   remaining: number,
   dueDate: string,
   storeName: string,
-  pixKey: string
+  pixKey: string,
+  templates: Record<string, string>
 ): string {
-  const lines: string[] = [];
-  lines.push(`Olá, ${firstName}.`);
-  lines.push("");
-  if (bucket === "vespera") {
-    lines.push(
-      `Lembrete: a parcela de *${brl(remaining)}* referente à sua compra vence *amanhã (${fmtDate(dueDate)})*.`
-    );
-  } else if (bucket === "hoje") {
-    lines.push(
-      `A parcela de *${brl(remaining)}* referente à sua compra vence *hoje (${fmtDate(dueDate)})*.`
-    );
-  } else {
-    lines.push(
-      `Consta em aberto a parcela de *${brl(remaining)}*, vencida em *${fmtDate(dueDate)}*.`
-    );
-  }
-  lines.push("");
-  if (pixKey) {
-    lines.push(
-      bucket === "atrasada"
-        ? `Para regularizar, efetue o pagamento via PIX na chave *${pixKey}* e envie o comprovante por aqui.`
-        : `Você pode efetuar o pagamento via PIX na chave *${pixKey}*. Após o pagamento, envie o comprovante por aqui.`
-    );
-  } else {
-    lines.push("Para efetuar o pagamento ou tirar dúvidas, entre em contato por aqui.");
-  }
-  lines.push("");
-  lines.push("Caso o pagamento já tenha sido efetuado, desconsidere esta mensagem.");
-  if (storeName) {
-    lines.push("");
-    lines.push(storeName);
-  }
-  return lines.join("\n");
+  const key =
+    bucket === "atrasada"
+      ? "lembrete_atraso"
+      : bucket === "hoje"
+      ? "lembrete_hoje"
+      : "lembrete_vespera";
+  const tpl = templates[key] || DEFAULT_TEMPLATES[key];
+  return applyTemplate(tpl, {
+    primeiro_nome: firstName,
+    cliente: fullName,
+    valor: brl(remaining),
+    vencimento: fmtDate(dueDate),
+    pix: pixKey || "",
+    loja: storeName || "",
+  });
 }
 
 Deno.serve(async (req) => {
@@ -110,13 +119,17 @@ Deno.serve(async (req) => {
     const { data: settings } = await supabase
       .from("app_settings")
       .select(
-        "evolution_url, evolution_api_key, evolution_instance, evolution_connected, store_name, wa_reminders_enabled, pix_key"
+        "evolution_url, evolution_api_key, evolution_instance, evolution_connected, store_name, wa_reminders_enabled, pix_key, message_templates"
       )
       .eq("id", 1)
       .single();
 
     const waEnabled = !!settings?.wa_reminders_enabled;
     const pixKey: string = settings?.pix_key || "";
+    const templates: Record<string, string> = {
+      ...DEFAULT_TEMPLATES,
+      ...((settings?.message_templates as Record<string, string> | null) || {}),
+    };
     const evoOk = !!(
       settings?.evolution_url &&
       settings?.evolution_api_key &&
@@ -228,10 +241,12 @@ Deno.serve(async (req) => {
             const msg = buildCustomerMessage(
               bucket,
               firstName,
+              cust.full_name,
               remaining,
               inst.due_date,
               storeName,
-              pixKey
+              pixKey,
+              templates
             );
             const logTitle =
               bucket === "vespera"

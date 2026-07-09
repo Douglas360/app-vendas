@@ -360,28 +360,86 @@ export interface PaymentMessageInput {
   totalDebt: number;
 }
 
-// Monta a mensagem de confirmação de pagamento de parcela
+// ============================================================
+// Modelos de mensagem editáveis (salvos no navegador + no banco)
+// ============================================================
+export interface MessageTemplates {
+  lembrete_vespera: string;
+  lembrete_hoje: string;
+  lembrete_atraso: string;
+  confirmacao_pagamento: string;
+}
+
+export const DEFAULT_TEMPLATES: MessageTemplates = {
+  lembrete_vespera:
+    "Olá, {primeiro_nome}.\n\n" +
+    "Lembrete: a parcela de *{valor}* referente à sua compra vence *amanhã ({vencimento})*.\n\n" +
+    "Você pode efetuar o pagamento via PIX na chave *{pix}*. Após o pagamento, envie o comprovante por aqui.\n\n" +
+    "Caso o pagamento já tenha sido efetuado, desconsidere esta mensagem.\n\n{loja}",
+  lembrete_hoje:
+    "Olá, {primeiro_nome}.\n\n" +
+    "A parcela de *{valor}* referente à sua compra vence *hoje ({vencimento})*.\n\n" +
+    "Você pode efetuar o pagamento via PIX na chave *{pix}*. Após o pagamento, envie o comprovante por aqui.\n\n" +
+    "Caso o pagamento já tenha sido efetuado, desconsidere esta mensagem.\n\n{loja}",
+  lembrete_atraso:
+    "Olá, {primeiro_nome}.\n\n" +
+    "Consta em aberto a parcela de *{valor}*, vencida em *{vencimento}*.\n\n" +
+    "Para regularizar, efetue o pagamento via PIX na chave *{pix}* e envie o comprovante por aqui.\n\n" +
+    "Caso o pagamento já tenha sido efetuado, desconsidere esta mensagem.\n\n{loja}",
+  confirmacao_pagamento:
+    "*{loja}*\n✅ *Pagamento recebido!*\n\n" +
+    "Olá {primeiro_nome}, confirmamos o recebimento de *{valor_pago}*.\n" +
+    "Parcela {parcela}ª · venda #{venda}\n" +
+    "{status_parcela}\n\n{saldo_linha}",
+};
+
+const TEMPLATES_KEY = "app_vendas_msg_templates";
+
+export function getTemplates(): MessageTemplates {
+  if (typeof window === "undefined") return DEFAULT_TEMPLATES;
+  try {
+    const raw = localStorage.getItem(TEMPLATES_KEY);
+    if (!raw) return DEFAULT_TEMPLATES;
+    return { ...DEFAULT_TEMPLATES, ...(JSON.parse(raw) as Partial<MessageTemplates>) };
+  } catch {
+    return DEFAULT_TEMPLATES;
+  }
+}
+
+export function saveTemplates(t: MessageTemplates) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(TEMPLATES_KEY, JSON.stringify(t));
+}
+
+// Substitui {variavel} pelos valores; mantém {x} se não houver valor.
+export function applyTemplate(tpl: string, vars: Record<string, string>): string {
+  return tpl
+    .replace(/\{(\w+)\}/g, (_m, k: string) => (k in vars ? vars[k] : `{${k}}`))
+    .trim();
+}
+
+// Monta a mensagem de confirmação de pagamento de parcela (usa o modelo)
 export function buildPaymentMessage(input: PaymentMessageInput): string {
   const store = getStoreInfo();
+  const t = getTemplates();
   const firstName = input.customerName.split(" ")[0] || input.customerName;
-  const lines: string[] = [];
-  lines.push(`*${store.name}*`);
-  lines.push("✅ *Pagamento recebido!*");
-  lines.push("");
-  lines.push(`Olá ${firstName}, confirmamos o recebimento de *${brl(input.amountPaid)}*.`);
-  lines.push(`Parcela ${input.installmentNumber}ª · venda #${input.saleNumber}`);
-  if (input.installmentPaid) {
-    lines.push("Parcela quitada! ✔️");
-  } else {
-    lines.push(`Resta nesta parcela: ${brl(input.remainingInInstallment)}`);
-  }
-  lines.push("");
-  if (input.totalDebt > 0) {
-    lines.push(`Saldo total em aberto: *${brl(input.totalDebt)}*`);
-  } else {
-    lines.push("Você está com tudo em dia. Obrigado! 🙏");
-  }
-  return lines.join("\n");
+  const statusParcela = input.installmentPaid
+    ? "Parcela quitada! ✔️"
+    : `Resta nesta parcela: ${brl(input.remainingInInstallment)}`;
+  const saldoLinha =
+    input.totalDebt > 0
+      ? `Saldo total em aberto: *${brl(input.totalDebt)}*`
+      : "Você está com tudo em dia. Obrigado! 🙏";
+  return applyTemplate(t.confirmacao_pagamento, {
+    loja: store.name || "",
+    primeiro_nome: firstName,
+    cliente: input.customerName,
+    valor_pago: brl(input.amountPaid),
+    parcela: String(input.installmentNumber),
+    venda: String(input.saleNumber),
+    status_parcela: statusParcela,
+    saldo_linha: saldoLinha,
+  });
 }
 
 // Monta a mensagem de cobrança de parcela — IDÊNTICA ao lembrete automático
@@ -392,6 +450,7 @@ export function buildCollectionMessage(input: {
   dueDate: string; // YYYY-MM-DD
 }): string {
   const store = getStoreInfo();
+  const t = getTemplates();
   const firstName = input.customerName.split(" ")[0] || input.customerName;
   const due = new Date(input.dueDate + "T00:00:00");
   const dueStr = due.toLocaleDateString("pt-BR");
@@ -399,42 +458,21 @@ export function buildCollectionMessage(input: {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const diffDays = Math.round((due.getTime() - today.getTime()) / 86400000);
-  const overdue = diffDays < 0;
-  const val = brl(input.remaining);
+  const tpl =
+    diffDays < 0
+      ? t.lembrete_atraso
+      : diffDays === 0
+      ? t.lembrete_hoje
+      : t.lembrete_vespera;
 
-  const lines: string[] = [];
-  lines.push(`Olá, ${firstName}.`);
-  lines.push("");
-  if (overdue) {
-    lines.push(`Consta em aberto a parcela de *${val}*, vencida em *${dueStr}*.`);
-  } else if (diffDays === 0) {
-    lines.push(`A parcela de *${val}* referente à sua compra vence *hoje (${dueStr})*.`);
-  } else if (diffDays === 1) {
-    lines.push(
-      `Lembrete: a parcela de *${val}* referente à sua compra vence *amanhã (${dueStr})*.`
-    );
-  } else {
-    lines.push(
-      `Lembrete: a parcela de *${val}* referente à sua compra vence em *${dueStr}*.`
-    );
-  }
-  lines.push("");
-  if (store.pixKey) {
-    lines.push(
-      overdue
-        ? `Para regularizar, efetue o pagamento via PIX na chave *${store.pixKey}* e envie o comprovante por aqui.`
-        : `Você pode efetuar o pagamento via PIX na chave *${store.pixKey}*. Após o pagamento, envie o comprovante por aqui.`
-    );
-  } else {
-    lines.push("Para efetuar o pagamento ou tirar dúvidas, entre em contato por aqui.");
-  }
-  lines.push("");
-  lines.push("Caso o pagamento já tenha sido efetuado, desconsidere esta mensagem.");
-  if (store.name) {
-    lines.push("");
-    lines.push(store.name);
-  }
-  return lines.join("\n");
+  return applyTemplate(tpl, {
+    primeiro_nome: firstName,
+    cliente: input.customerName,
+    valor: brl(input.remaining),
+    vencimento: dueStr,
+    pix: store.pixKey || "",
+    loja: store.name || "",
+  });
 }
 
 // Envia o comprovante para o WhatsApp do cliente.

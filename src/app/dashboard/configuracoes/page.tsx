@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import { useTheme } from "next-themes";
 import {
   User,
@@ -48,6 +49,11 @@ import {
   disconnectWhatsapp,
   setWhatsappConnected,
   type EvolutionConfig,
+  type MessageTemplates,
+  DEFAULT_TEMPLATES,
+  getTemplates,
+  saveTemplates,
+  applyTemplate,
 } from "@/lib/whatsapp";
 import {
   Select,
@@ -196,6 +202,84 @@ export default function ConfiguracoesPage() {
       );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ---- Modelos de mensagem ----
+  const [templates, setTemplates] = useState<MessageTemplates>(() => getTemplates());
+  const [savingTpl, setSavingTpl] = useState(false);
+
+  useEffect(() => {
+    supabase
+      .from("app_settings")
+      .select("message_templates")
+      .eq("id", 1)
+      .single()
+      .then((res: { data: { message_templates: Partial<MessageTemplates> | null } | null }) => {
+        if (res.data?.message_templates) {
+          const merged = { ...DEFAULT_TEMPLATES, ...res.data.message_templates };
+          setTemplates(merged);
+          saveTemplates(merged);
+        }
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleSaveTemplates() {
+    setSavingTpl(true);
+    saveTemplates(templates);
+    const { error } = await supabase
+      .from("app_settings")
+      .update({ message_templates: templates })
+      .eq("id", 1);
+    setSavingTpl(false);
+    if (error) {
+      toast.error("Não foi possível salvar os modelos", { description: error.message });
+    } else {
+      toast.success("Modelos de mensagem salvos!");
+    }
+  }
+
+  function handleResetTemplates() {
+    setTemplates(DEFAULT_TEMPLATES);
+    toast.info("Modelos restaurados para o padrão. Clique em Salvar para aplicar.");
+  }
+
+  function previewCollection(kind: "vespera" | "hoje" | "atraso"): string {
+    const offset = kind === "atraso" ? -3 : kind === "hoje" ? 0 : 1;
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+      d.getDate()
+    ).padStart(2, "0")}`;
+    // usa o texto em edição (localStorage já reflete só ao salvar; então montamos aqui)
+    return applyTemplate(
+      kind === "atraso"
+        ? templates.lembrete_atraso
+        : kind === "hoje"
+        ? templates.lembrete_hoje
+        : templates.lembrete_vespera,
+      {
+        primeiro_nome: "Maria",
+        cliente: "Maria Silva",
+        valor: "R$ 99,90",
+        vencimento: new Date(iso + "T00:00:00").toLocaleDateString("pt-BR"),
+        pix: store.pixKey || "(sua chave PIX)",
+        loja: store.name || "Sua Loja",
+      }
+    );
+  }
+
+  function previewPayment(): string {
+    return applyTemplate(templates.confirmacao_pagamento, {
+      loja: store.name || "Sua Loja",
+      primeiro_nome: "Maria",
+      cliente: "Maria Silva",
+      valor_pago: "R$ 50,00",
+      parcela: "1",
+      venda: "34",
+      status_parcela: "Resta nesta parcela: R$ 49,90",
+      saldo_linha: "Saldo total em aberto: *R$ 49,90*",
+    });
+  }
 
   async function handleToggleWaReminders(value: boolean) {
     setWaReminders(value);
@@ -775,6 +859,92 @@ export default function ConfiguracoesPage() {
               salvas apenas neste navegador. O comprovante é enviado ao finalizar a venda, quando
               o cliente selecionado tiver telefone.
             </p>
+          </CardContent>
+        </Card>
+
+        {/* Modelos de Mensagem Card */}
+        <Card className="border shadow-md md:col-span-2">
+          <CardHeader className="flex flex-row items-center gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500 dark:bg-emerald-500/20">
+              <MessageCircle className="h-6 w-6" />
+            </div>
+            <div>
+              <CardTitle>Mensagens (Modelos)</CardTitle>
+              <CardDescription>
+                Edite os textos enviados aos clientes. Valem para o envio manual e o automático das 9h.
+              </CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-5 border-t pt-4">
+            <div className="rounded-lg bg-muted/40 p-3 text-xs text-muted-foreground">
+              <span className="font-semibold text-foreground">Variáveis disponíveis:</span>{" "}
+              <code>{"{primeiro_nome}"}</code>, <code>{"{cliente}"}</code>, <code>{"{valor}"}</code>,{" "}
+              <code>{"{vencimento}"}</code>, <code>{"{pix}"}</code>, <code>{"{loja}"}</code>. Na
+              confirmação de pagamento também: <code>{"{valor_pago}"}</code>, <code>{"{parcela}"}</code>,{" "}
+              <code>{"{venda}"}</code>, <code>{"{status_parcela}"}</code>, <code>{"{saldo_linha}"}</code>.
+            </div>
+
+            {(
+              [
+                {
+                  key: "lembrete_vespera" as const,
+                  label: "Lembrete — vence amanhã",
+                  preview: previewCollection("vespera"),
+                },
+                {
+                  key: "lembrete_hoje" as const,
+                  label: "Lembrete — vence hoje",
+                  preview: previewCollection("hoje"),
+                },
+                {
+                  key: "lembrete_atraso" as const,
+                  label: "Lembrete — parcela atrasada",
+                  preview: previewCollection("atraso"),
+                },
+                {
+                  key: "confirmacao_pagamento" as const,
+                  label: "Confirmação de pagamento",
+                  preview: previewPayment(),
+                },
+              ]
+            ).map((t) => (
+              <div key={t.key} className="space-y-1.5">
+                <label className="text-sm font-semibold">{t.label}</label>
+                <Textarea
+                  value={templates[t.key]}
+                  onChange={(e) =>
+                    setTemplates((prev) => ({ ...prev, [t.key]: e.target.value }))
+                  }
+                  className="min-h-32 font-mono text-xs"
+                />
+                <details className="text-xs text-muted-foreground">
+                  <summary className="cursor-pointer select-none">Ver prévia</summary>
+                  <pre className="mt-1 whitespace-pre-wrap rounded-md bg-muted/50 p-2 text-[11px]">
+                    {t.preview}
+                  </pre>
+                </details>
+              </div>
+            ))}
+
+            <div className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+              <span className="font-semibold text-foreground">Comprovante de venda:</span> o corpo
+              (itens, valores) é montado automaticamente. Para mudar a mensagem final do recibo,
+              edite o <span className="font-medium">rodapé</span> em &ldquo;Dados da Loja&rdquo; acima.
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <Button variant="outline" onClick={handleResetTemplates} className="sm:w-auto">
+                Restaurar padrão
+              </Button>
+              <Button
+                onClick={handleSaveTemplates}
+                disabled={savingTpl}
+                className="bg-emerald-600 text-white hover:bg-emerald-700 sm:w-auto"
+              >
+                {savingTpl && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Salvar Mensagens
+              </Button>
+            </div>
           </CardContent>
         </Card>
 
