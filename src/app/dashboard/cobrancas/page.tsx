@@ -44,6 +44,7 @@ export default function CobrancasPage() {
   const supabase = createClient();
   const [rows, setRows] = useState<Row[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [sentIds, setSentIds] = useState<Set<string>>(new Set());
 
   const todayStr = ymd(0);
   const tomorrowStr = ymd(1);
@@ -63,6 +64,28 @@ export default function CobrancasPage() {
         (r) => Number(r.amount) - Number(r.amount_paid) > 0.001
       );
       setRows(list);
+
+      // Marca as que já foram enviadas hoje (registradas no histórico)
+      const ids = list.map((r) => r.id);
+      if (ids.length) {
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+        const { data: logs } = await supabase
+          .from("notification_log")
+          .select("installment_id")
+          .in("installment_id", ids)
+          .eq("kind", "cobranca_manual")
+          .gte("created_at", start.toISOString());
+        setSentIds(
+          new Set(
+            (logs || [])
+              .map((l: { installment_id: string | null }) => l.installment_id)
+              .filter((v: string | null): v is string => !!v)
+          )
+        );
+      } else {
+        setSentIds(new Set());
+      }
     } finally {
       setIsLoading(false);
     }
@@ -92,12 +115,32 @@ export default function CobrancasPage() {
     });
   }
 
-  function sendWa(r: Row) {
+  async function sendWa(r: Row) {
     if (!r.customer?.phone) {
       toast.error("Cliente sem telefone cadastrado.");
       return;
     }
-    window.open(buildWhatsappLink(r.customer.phone, messageFor(r)), "_blank");
+    const msg = messageFor(r);
+    // Abre o WhatsApp no gesto do clique
+    window.open(buildWhatsappLink(r.customer.phone, msg), "_blank");
+    // Marca como enviado (registra no histórico) — envio manual, marcação otimista
+    setSentIds((prev) => new Set(prev).add(r.id));
+    try {
+      await supabase.from("notification_log").insert({
+        channel: "whatsapp",
+        kind: "cobranca_manual",
+        recipient_type: "cliente",
+        customer_id: r.customer.id,
+        recipient_name: r.customer.full_name,
+        recipient_phone: r.customer.phone,
+        title: "Cobrança do dia",
+        body: msg,
+        status: "enviado",
+        installment_id: r.id,
+      });
+    } catch {
+      /* não bloqueia o fluxo */
+    }
   }
 
   async function copyMsg(r: Row) {
@@ -136,15 +179,25 @@ export default function CobrancasPage() {
             {items.map((r) => {
               const remaining = Number(r.amount) - Number(r.amount_paid);
               const noPhone = !r.customer?.phone;
+              const sent = sentIds.has(r.id);
               return (
                 <div
                   key={r.id}
-                  className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between"
+                  className={`flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between ${
+                    sent ? "bg-emerald-500/5" : ""
+                  }`}
                 >
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold">
-                      {r.customer?.full_name || "Cliente"}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="truncate text-sm font-semibold">
+                        {r.customer?.full_name || "Cliente"}
+                      </p>
+                      {sent && (
+                        <Badge className="bg-emerald-600 text-white">
+                          <CheckCircle2 className="mr-1 h-3 w-3" /> Enviado
+                        </Badge>
+                      )}
+                    </div>
                     <p className="text-xs text-muted-foreground">
                       {r.sale?.sale_number ? `Venda #${r.sale.sale_number} · ` : ""}
                       {r.installment_number}ª parcela · venc.{" "}
@@ -160,12 +213,17 @@ export default function CobrancasPage() {
                   <div className="flex shrink-0 gap-2">
                     <Button
                       size="sm"
+                      variant={sent ? "outline" : "default"}
                       disabled={noPhone}
                       onClick={() => sendWa(r)}
-                      className="h-8 bg-emerald-600 px-2.5 text-xs text-white hover:bg-emerald-700"
+                      className={
+                        sent
+                          ? "h-8 px-2.5 text-xs"
+                          : "h-8 bg-emerald-600 px-2.5 text-xs text-white hover:bg-emerald-700"
+                      }
                     >
                       <MessageCircle className="mr-1.5 h-3.5 w-3.5" />
-                      WhatsApp
+                      {sent ? "Reenviar" : "WhatsApp"}
                     </Button>
                     <Button
                       size="icon"
