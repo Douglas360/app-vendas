@@ -31,6 +31,7 @@ interface Row {
   amount_paid: number;
   due_date: string;
   installment_number: number;
+  status: string;
   customer: { id: string; full_name: string; phone: string | null } | null;
   sale: { sale_number: number } | null;
 }
@@ -66,7 +67,8 @@ function monthLabelFromYm(ym: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-type Period = "proximos" | "mes_atual" | "mes_seguinte" | "custom";
+type Period = "proximos" | "mes_atual" | "mes_seguinte" | "custom" | "todas";
+type StatusView = "all" | "receber" | "pago";
 
 export default function CobrancasPage() {
   const supabase = createClient();
@@ -74,6 +76,7 @@ export default function CobrancasPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [sentIds, setSentIds] = useState<Set<string>>(new Set());
   const [period, setPeriod] = useState<Period>("proximos");
+  const [statusView, setStatusView] = useState<StatusView>("receber");
   const [customMonth, setCustomMonth] = useState<string>(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -104,18 +107,20 @@ export default function CobrancasPage() {
       let query = supabase
         .from("credit_installments")
         .select(
-          "id, amount, amount_paid, due_date, installment_number, customer:customers(id, full_name, phone), sale:sales(sale_number)"
+          "id, amount, amount_paid, due_date, installment_number, status, customer:customers(id, full_name, phone), sale:sales(sale_number)"
         )
-        .in("status", ["pendente", "atrasado"])
-        .order("due_date", { ascending: true });
+        .in("status", ["pendente", "atrasado", "pago"])
+        .order("due_date", { ascending: true })
+        .limit(2000);
       if (range) {
         query = query.gte("due_date", range.from).lte("due_date", range.to);
-      } else {
+      } else if (period === "proximos") {
         query = query.lte("due_date", tomorrowStr);
       }
+      // period === "todas": sem filtro de data
       const { data } = await query;
       const list = ((data as unknown as Row[]) || []).filter(
-        (r) => Number(r.amount) - Number(r.amount_paid) > 0.001
+        (r) => Number(r.amount) > 0
       );
       setRows(list);
 
@@ -143,32 +148,45 @@ export default function CobrancasPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [supabase, tomorrowStr, range]);
+  }, [supabase, tomorrowStr, range, period]);
 
   useEffect(() => {
     load();
   }, [load]);
 
+  const isPaid = (r: Row) => Number(r.amount) - Number(r.amount_paid) <= 0.001;
+
+  // Lista exibida conforme o filtro de status (cards clicáveis)
+  const shown = useMemo(() => {
+    if (statusView === "receber") return rows.filter((r) => !isPaid(r));
+    if (statusView === "pago") return rows.filter((r) => isPaid(r));
+    return rows;
+  }, [rows, statusView]);
+
   const groups = useMemo(() => {
     const atrasadas: Row[] = [];
     const hoje: Row[] = [];
     const amanha: Row[] = [];
-    for (const r of rows) {
+    for (const r of shown) {
       if (r.due_date < todayStr) atrasadas.push(r);
       else if (r.due_date === todayStr) hoje.push(r);
       else amanha.push(r);
     }
     return { atrasadas, hoje, amanha };
-  }, [rows, todayStr]);
+  }, [shown, todayStr]);
 
   const totals = useMemo(() => {
     let receber = 0;
     let pago = 0;
+    let countReceber = 0;
+    let countPago = 0;
     for (const r of rows) {
       receber += Number(r.amount) - Number(r.amount_paid);
       pago += Number(r.amount_paid);
+      if (isPaid(r)) countPago += 1;
+      else countReceber += 1;
     }
-    return { count: rows.length, receber, pago };
+    return { count: rows.length, receber, pago, countReceber, countPago };
   }, [rows]);
 
   function messageFor(r: Row): string {
@@ -242,13 +260,14 @@ export default function CobrancasPage() {
           <CardContent className="divide-y p-0">
             {items.map((r) => {
               const remaining = Number(r.amount) - Number(r.amount_paid);
+              const paid = remaining <= 0.001;
               const noPhone = !r.customer?.phone;
               const sent = sentIds.has(r.id);
               return (
                 <div
                   key={r.id}
                   className={`flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between ${
-                    sent ? "bg-emerald-500/5" : ""
+                    paid ? "bg-emerald-500/5" : sent ? "bg-emerald-500/5" : ""
                   }`}
                 >
                   <div className="min-w-0">
@@ -256,49 +275,61 @@ export default function CobrancasPage() {
                       <p className="truncate text-sm font-semibold">
                         {r.customer?.full_name || "Cliente"}
                       </p>
-                      {sent && (
+                      {paid ? (
+                        <Badge className="bg-emerald-600 text-white">
+                          <CheckCircle2 className="mr-1 h-3 w-3" /> Quitada
+                        </Badge>
+                      ) : sent ? (
                         <Badge className="bg-emerald-600 text-white">
                           <CheckCircle2 className="mr-1 h-3 w-3" /> Enviado
                         </Badge>
-                      )}
+                      ) : null}
                     </div>
                     <p className="text-xs text-muted-foreground">
                       {r.sale?.sale_number ? `Venda #${r.sale.sale_number} · ` : ""}
                       {r.installment_number}ª parcela · venc.{" "}
                       {new Date(r.due_date + "T00:00:00").toLocaleDateString("pt-BR")} ·{" "}
-                      <span className="font-bold text-foreground">{brl(remaining)}</span>
+                      {paid ? (
+                        <span className="font-bold text-emerald-600">
+                          Pago {brl(Number(r.amount_paid))}
+                        </span>
+                      ) : (
+                        <span className="font-bold text-foreground">{brl(remaining)}</span>
+                      )}
                     </p>
-                    {noPhone && (
+                    {!paid && noPhone && (
                       <p className="mt-0.5 flex items-center gap-1 text-[11px] text-amber-600">
                         <AlertTriangle className="h-3 w-3" /> Sem telefone cadastrado
                       </p>
                     )}
                   </div>
-                  <div className="flex shrink-0 gap-2">
-                    <Button
-                      size="sm"
-                      variant={sent ? "outline" : "default"}
-                      disabled={noPhone}
-                      onClick={() => sendWa(r)}
-                      className={
-                        sent
-                          ? "h-8 px-2.5 text-xs"
-                          : "h-8 bg-emerald-600 px-2.5 text-xs text-white hover:bg-emerald-700"
-                      }
-                    >
-                      <MessageCircle className="mr-1.5 h-3.5 w-3.5" />
-                      {sent ? "Reenviar" : "WhatsApp"}
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="outline"
-                      onClick={() => copyMsg(r)}
-                      title="Copiar mensagem"
-                      className="h-8 w-8"
-                    >
-                      <Copy className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
+                  {!paid && (
+                    <div className="flex shrink-0 gap-2">
+                      <Button
+                        size="sm"
+                        variant={sent ? "outline" : "default"}
+                        disabled={noPhone}
+                        onClick={() => sendWa(r)}
+                        className={
+                          sent
+                            ? "h-8 px-2.5 text-xs"
+                            : "h-8 bg-emerald-600 px-2.5 text-xs text-white hover:bg-emerald-700"
+                        }
+                      >
+                        <MessageCircle className="mr-1.5 h-3.5 w-3.5" />
+                        {sent ? "Reenviar" : "WhatsApp"}
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="outline"
+                        onClick={() => copyMsg(r)}
+                        title="Copiar mensagem"
+                        className="h-8 w-8"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -334,6 +365,7 @@ export default function CobrancasPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="todas">Todas as parcelas</SelectItem>
               <SelectItem value="proximos">Vencimentos próximos (atrasadas, hoje, amanhã)</SelectItem>
               <SelectItem value="mes_atual">Este mês</SelectItem>
               <SelectItem value="mes_seguinte">Mês que vem</SelectItem>
@@ -351,27 +383,43 @@ export default function CobrancasPage() {
         )}
       </div>
 
-      {/* Resumo do período */}
+      {/* Resumo do período — cards clicáveis (filtram a lista) */}
       {!isLoading && total > 0 && (
         <div className="grid grid-cols-3 gap-3">
-          <Card className="border shadow-sm">
-            <CardContent className="p-3">
-              <p className="text-xs text-muted-foreground">Parcelas</p>
-              <p className="text-lg font-bold">{totals.count}</p>
-            </CardContent>
-          </Card>
-          <Card className="border shadow-sm">
-            <CardContent className="p-3">
-              <p className="text-xs text-muted-foreground">A receber</p>
-              <p className="text-lg font-bold text-rose-600">{brl(totals.receber)}</p>
-            </CardContent>
-          </Card>
-          <Card className="border shadow-sm">
-            <CardContent className="p-3">
-              <p className="text-xs text-muted-foreground">Já pago</p>
-              <p className="text-lg font-bold text-emerald-600">{brl(totals.pago)}</p>
-            </CardContent>
-          </Card>
+          <button
+            type="button"
+            onClick={() => setStatusView("all")}
+            className={`rounded-xl border bg-card p-3 text-left shadow-sm transition-all ${
+              statusView === "all" ? "ring-2 ring-indigo-500" : "hover:bg-muted/40"
+            }`}
+          >
+            <p className="text-xs text-muted-foreground">Parcelas</p>
+            <p className="text-lg font-bold">{totals.count}</p>
+          </button>
+          <button
+            type="button"
+            onClick={() => setStatusView("receber")}
+            className={`rounded-xl border bg-card p-3 text-left shadow-sm transition-all ${
+              statusView === "receber" ? "ring-2 ring-rose-500" : "hover:bg-muted/40"
+            }`}
+          >
+            <p className="text-xs text-muted-foreground">
+              A receber ({totals.countReceber})
+            </p>
+            <p className="text-lg font-bold text-rose-600">{brl(totals.receber)}</p>
+          </button>
+          <button
+            type="button"
+            onClick={() => setStatusView("pago")}
+            className={`rounded-xl border bg-card p-3 text-left shadow-sm transition-all ${
+              statusView === "pago" ? "ring-2 ring-emerald-500" : "hover:bg-muted/40"
+            }`}
+          >
+            <p className="text-xs text-muted-foreground">
+              Já pago ({totals.countPago})
+            </p>
+            <p className="text-lg font-bold text-emerald-600">{brl(totals.pago)}</p>
+          </button>
         </div>
       )}
 
@@ -380,19 +428,21 @@ export default function CobrancasPage() {
           <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
           <p className="text-sm text-muted-foreground">Carregando cobranças...</p>
         </div>
-      ) : total === 0 ? (
+      ) : shown.length === 0 ? (
         <Card className="border shadow-sm">
           <CardContent className="flex h-48 flex-col items-center justify-center gap-2 text-center">
             <CheckCircle2 className="h-10 w-10 text-emerald-500" />
             <h3 className="font-semibold">Nada por aqui</h3>
             <p className="max-w-sm text-sm text-muted-foreground">
-              {period === "proximos"
-                ? "Nenhuma parcela vencendo amanhã, hoje ou em atraso no momento."
-                : "Nenhuma parcela em aberto neste período."}
+              {statusView === "pago"
+                ? "Nenhuma parcela quitada neste período."
+                : statusView === "receber"
+                ? "Nenhuma parcela a receber neste período."
+                : "Nenhuma parcela neste período."}
             </p>
           </CardContent>
         </Card>
-      ) : period === "proximos" ? (
+      ) : period === "proximos" && statusView !== "pago" ? (
         <>
           {renderSection("Atrasadas", groups.atrasadas, "rose")}
           {renderSection("Vencem hoje", groups.hoje, "amber")}
@@ -400,8 +450,14 @@ export default function CobrancasPage() {
         </>
       ) : (
         renderSection(
-          range ? monthLabelFromYm(range.from.slice(0, 7)) : "Parcelas",
-          rows,
+          statusView === "pago"
+            ? "Parcelas quitadas"
+            : period === "todas"
+            ? "Todas as parcelas"
+            : range
+            ? monthLabelFromYm(range.from.slice(0, 7))
+            : "Parcelas",
+          shown,
           "indigo"
         )
       )}
