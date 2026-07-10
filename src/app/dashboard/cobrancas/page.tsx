@@ -33,7 +33,11 @@ interface Row {
   installment_number: number;
   status: string;
   customer: { id: string; full_name: string; phone: string | null } | null;
-  sale: { sale_number: number } | null;
+  sale: {
+    sale_number: number;
+    total: number;
+    items: { cost_price: number; quantity: number }[] | null;
+  } | null;
 }
 
 function brl(v: number) {
@@ -107,7 +111,7 @@ export default function CobrancasPage() {
       let query = supabase
         .from("credit_installments")
         .select(
-          "id, amount, amount_paid, due_date, installment_number, status, customer:customers(id, full_name, phone), sale:sales(sale_number)"
+          "id, amount, amount_paid, due_date, installment_number, status, customer:customers(id, full_name, phone), sale:sales(sale_number, total, items:sale_items(cost_price, quantity))"
         )
         .in("status", ["pendente", "atrasado", "pago"])
         .order("due_date", { ascending: true })
@@ -180,17 +184,30 @@ export default function CobrancasPage() {
     let pago = 0;
     let countReceber = 0;
     let countPago = 0;
+    let custo = 0;
     for (const r of rows) {
-      receber += Number(r.amount) - Number(r.amount_paid);
+      const amount = Number(r.amount);
+      receber += amount - Number(r.amount_paid);
       pago += Number(r.amount_paid);
       if (isPaid(r)) countPago += 1;
       else countReceber += 1;
+
+      // Custo proporcional: (custo da venda) × (parcela / total da venda)
+      const saleTotal = Number(r.sale?.total || 0);
+      const saleCost = (r.sale?.items || []).reduce(
+        (s, it) => s + Number(it.cost_price) * Number(it.quantity),
+        0
+      );
+      if (saleTotal > 0) custo += saleCost * (amount / saleTotal);
     }
+    const valor = receber + pago;
     return {
       count: rows.length,
       receber,
       pago,
-      valor: receber + pago,
+      valor,
+      custo,
+      lucro: valor - custo,
       countReceber,
       countPago,
     };
@@ -396,7 +413,12 @@ export default function CobrancasPage() {
           <div className="rounded-xl border bg-card p-3 shadow-sm">
             <p className="text-xs text-muted-foreground">Valor total</p>
             <p className="text-lg font-bold text-indigo-600">{brl(totals.valor)}</p>
-            <p className="text-[11px] text-muted-foreground">{totals.count} parcela(s)</p>
+            <p className="text-[10px] leading-tight text-muted-foreground">
+              Custo: {brl(totals.custo)}
+            </p>
+            <p className="text-[10px] leading-tight font-medium text-emerald-600">
+              Lucro: {brl(totals.lucro)}
+            </p>
           </div>
           <button
             type="button"
