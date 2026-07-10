@@ -186,7 +186,14 @@ export default function CobrancasPage() {
       if (isPaid(r)) countPago += 1;
       else countReceber += 1;
     }
-    return { count: rows.length, receber, pago, countReceber, countPago };
+    return {
+      count: rows.length,
+      receber,
+      pago,
+      valor: receber + pago,
+      countReceber,
+      countPago,
+    };
   }, [rows]);
 
   function messageFor(r: Row): string {
@@ -385,7 +392,12 @@ export default function CobrancasPage() {
 
       {/* Resumo do período — cards clicáveis (filtram a lista) */}
       {!isLoading && total > 0 && (
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="rounded-xl border bg-card p-3 shadow-sm">
+            <p className="text-xs text-muted-foreground">Valor total</p>
+            <p className="text-lg font-bold text-indigo-600">{brl(totals.valor)}</p>
+            <p className="text-[11px] text-muted-foreground">{totals.count} parcela(s)</p>
+          </div>
           <button
             type="button"
             onClick={() => setStatusView("all")}
