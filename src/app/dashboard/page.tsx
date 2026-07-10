@@ -22,7 +22,6 @@ import {
 import {
   ShoppingCart,
   Package,
-  Users,
   TrendingUp,
   DollarSign,
   Wallet,
@@ -123,8 +122,6 @@ export default function DashboardPage() {
   const [salesTodayTotal, setSalesTodayTotal] = useState(0);
   const [salesTodayCount, setSalesTodayCount] = useState(0);
   const [cashTodayTotal, setCashTodayTotal] = useState(0);
-  const [productsCount, setProductsCount] = useState(0);
-  const [customersCount, setCustomersCount] = useState(0);
   const [fiadoTotal, setFiadoTotal] = useState(0);
 
   // Alerts
@@ -192,19 +189,11 @@ export default function DashboardPage() {
         cashToday?.reduce((acc: number, m: any) => acc + Number(m.amount), 0) || 0
       );
 
-      // 2. Fetch products count
-      const { count: prodCount, error: prodErr } = await supabase
-        .from("products")
-        .select("*", { count: "exact", head: true });
-      if (prodErr) throw prodErr;
-      setProductsCount(prodCount || 0);
-
-      // 3. Fetch customers count & total debt
+      // 2. Fetch customers total debt (crediário a receber)
       const { data: custData, error: custErr } = await supabase
         .from("customers")
         .select("current_debt");
       if (custErr) throw custErr;
-      setCustomersCount(custData?.length || 0);
       setFiadoTotal(custData?.reduce((acc: number, c: any) => acc + c.current_debt, 0) || 0);
 
       // 4. Fetch low stock products (limit 5)
@@ -299,7 +288,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="Faturamento Hoje"
           value={`R$ ${salesTodayTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`}
@@ -327,20 +316,6 @@ export default function DashboardPage() {
           description="saldo devedor ativo"
           icon={TrendingDown}
           variant="danger"
-        />
-        <StatCard
-          title="Produtos"
-          value={productsCount.toString()}
-          description="itens cadastrados"
-          icon={Package}
-          variant="warning"
-        />
-        <StatCard
-          title="Clientes"
-          value={customersCount.toString()}
-          description="contatos cadastrados"
-          icon={Users}
-          variant="info"
         />
       </div>
 
