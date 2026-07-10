@@ -382,10 +382,7 @@ export default function FiadoPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Devedor</TableHead>
-                  <TableHead>Contato</TableHead>
-                  <TableHead>CPF / CNPJ</TableHead>
                   <TableHead className="text-right">Dívida Acumulada</TableHead>
-                  <TableHead className="text-right">Limite de Crédito</TableHead>
                   <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
@@ -393,13 +390,8 @@ export default function FiadoPage() {
                 {filteredDebtors.map((debtor) => (
                   <TableRow key={debtor.id} className="hover:bg-muted/30">
                     <TableCell className="font-semibold">{debtor.full_name}</TableCell>
-                    <TableCell className="text-sm">{debtor.phone || "Sem telefone"}</TableCell>
-                    <TableCell className="text-sm font-mono">{debtor.cpf_cnpj || "-"}</TableCell>
                     <TableCell className="text-right font-extrabold text-rose-500">
                       R$ {debtor.current_debt.toFixed(2)}
-                    </TableCell>
-                    <TableCell className="text-right text-sm font-medium">
-                      {debtor.credit_limit === 0 ? "Ilimitado" : `R$ ${debtor.credit_limit.toFixed(2)}`}
                     </TableCell>
                     <TableCell className="text-right">
                       <Button
