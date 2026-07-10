@@ -224,12 +224,12 @@ export default function VendasPage() {
     return matchesStatus && matchesSearch && matchesDate;
   });
 
-  // Calculate Metrics
-  const finalizedSales = sales.filter((s) => s.status === "finalizada");
+  // Métricas — refletem os filtros aplicados (busca, status, período)
+  const finalizedSales = filteredSales.filter((s) => s.status === "finalizada");
   const totalRevenue = finalizedSales.reduce((acc, s) => acc + s.total, 0);
   const averageTicket = finalizedSales.length > 0 ? totalRevenue / finalizedSales.length : 0;
   const totalSalesCount = finalizedSales.length;
-  const cancelledCount = sales.filter((s) => s.status === "cancelada").length;
+  const cancelledCount = filteredSales.filter((s) => s.status === "cancelada").length;
 
   return (
     <div className="space-y-6">
@@ -253,7 +253,7 @@ export default function VendasPage() {
       <div className="grid gap-4 md:grid-cols-4">
         <Card className="border shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Faturamento Geral</CardTitle>
+            <CardTitle className="text-sm font-medium">Faturamento</CardTitle>
             <TrendingUp className="h-4 w-4 text-indigo-500" />
           </CardHeader>
           <CardContent>
