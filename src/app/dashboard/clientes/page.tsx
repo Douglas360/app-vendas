@@ -28,6 +28,13 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Plus,
   Search,
   Edit,
@@ -40,6 +47,7 @@ import {
   EyeOff,
   DollarSign,
   ChevronRight,
+  UsersRound,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -66,10 +74,19 @@ export default function ClientesPage() {
   const money = (v: number) =>
     showValues ? `R$ ${v.toFixed(2)}` : "R$ ••••";
 
-  // Customer Dialog State
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
-  const [customerForm, setCustomerForm] = useState({
+  // Grupos de clientes
+  interface Group {
+    id: string;
+    name: string;
+    color: string;
+  }
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [isGroupsOpen, setIsGroupsOpen] = useState(false);
+  const [newGroupName, setNewGroupName] = useState("");
+  const [newGroupColor, setNewGroupColor] = useState("#6366f1");
+  const [isSavingGroup, setIsSavingGroup] = useState(false);
+
+  const emptyForm = {
     full_name: "",
     email: "",
     phone: "",
@@ -84,20 +101,27 @@ export default function ClientesPage() {
     credit_limit: "0",
     notes: "",
     is_active: true,
-  });
+    group_id: "",
+  };
+
+  // Customer Dialog State
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [customerForm, setCustomerForm] = useState(emptyForm);
   const [isSaving, setIsSaving] = useState(false);
 
   // Fetch Data
   const fetchCustomers = useCallback(async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("customers")
-        .select("*")
-        .order("full_name");
+      const [custRes, grpRes] = await Promise.all([
+        supabase.from("customers").select("*").order("full_name"),
+        supabase.from("customer_groups").select("id, name, color").order("name"),
+      ]);
 
-      if (error) throw error;
-      setCustomers(data || []);
+      if (custRes.error) throw custRes.error;
+      setCustomers(custRes.data || []);
+      setGroups((grpRes.data as Group[]) || []);
     } catch (error: any) {
       console.error(error);
       toast.error("Erro ao buscar clientes", {
@@ -111,6 +135,41 @@ export default function ClientesPage() {
   useEffect(() => {
     fetchCustomers();
   }, [fetchCustomers]);
+
+  async function handleAddGroup(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newGroupName.trim()) {
+      toast.error("Informe o nome do grupo.");
+      return;
+    }
+    setIsSavingGroup(true);
+    try {
+      const { error } = await supabase
+        .from("customer_groups")
+        .insert({ name: newGroupName.trim(), color: newGroupColor });
+      if (error) throw error;
+      setNewGroupName("");
+      setNewGroupColor("#6366f1");
+      toast.success("Grupo criado!");
+      fetchCustomers();
+    } catch (error: any) {
+      toast.error("Erro ao criar grupo", { description: error.message });
+    } finally {
+      setIsSavingGroup(false);
+    }
+  }
+
+  async function handleDeleteGroup(id: string) {
+    if (!confirm("Excluir este grupo? Os clientes ligados a ele ficarão sem grupo.")) return;
+    try {
+      const { error } = await supabase.from("customer_groups").delete().eq("id", id);
+      if (error) throw error;
+      toast.success("Grupo excluído.");
+      fetchCustomers();
+    } catch (error: any) {
+      toast.error("Erro ao excluir grupo", { description: error.message });
+    }
+  }
 
   // Filter
   const filteredCustomers = customers.filter((cust) => {
@@ -131,22 +190,7 @@ export default function ClientesPage() {
   // Open Dialog to Create
   function handleAddCustomer() {
     setEditingCustomer(null);
-    setCustomerForm({
-      full_name: "",
-      email: "",
-      phone: "",
-      cpf_cnpj: "",
-      address_street: "",
-      address_number: "",
-      address_complement: "",
-      address_neighborhood: "",
-      address_city: "",
-      address_state: "",
-      address_zip: "",
-      credit_limit: "0",
-      notes: "",
-      is_active: true,
-    });
+    setCustomerForm({ ...emptyForm });
     setIsDialogOpen(true);
   }
 
@@ -168,6 +212,7 @@ export default function ClientesPage() {
       credit_limit: customer.credit_limit.toString(),
       notes: customer.notes || "",
       is_active: customer.is_active,
+      group_id: (customer as { group_id?: string | null }).group_id || "",
     });
     setIsDialogOpen(true);
   }
@@ -203,6 +248,7 @@ export default function ClientesPage() {
         credit_limit: parseFloat(customerForm.credit_limit) || 0,
         notes: customerForm.notes || null,
         is_active: customerForm.is_active,
+        group_id: customerForm.group_id || null,
         created_by: profile?.id || null,
       };
 
@@ -287,6 +333,12 @@ export default function ClientesPage() {
             <RefreshCw className={`h-4 w-4 sm:mr-2 ${isLoading && "animate-spin"}`} />
             <span className="hidden sm:inline">Atualizar</span>
           </Button>
+          {isAdmin && (
+            <Button variant="outline" size="sm" onClick={() => setIsGroupsOpen(true)}>
+              <UsersRound className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Grupos</span>
+            </Button>
+          )}
           <Button size="sm" onClick={handleAddCustomer} className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm">
             <Plus className="h-4 w-4 sm:mr-2" />
             <span className="hidden sm:inline">Novo Cliente</span>
@@ -571,6 +623,42 @@ export default function ClientesPage() {
                 />
               </div>
 
+              <div className="space-y-1.5">
+                <Label>Grupo</Label>
+                <div className="flex items-center gap-2">
+                  <Select
+                    value={customerForm.group_id || "none"}
+                    onValueChange={(v) =>
+                      setCustomerForm({ ...customerForm, group_id: v === "none" ? "" : v })
+                    }
+                  >
+                    <SelectTrigger className="flex-1">
+                      <SelectValue placeholder="Sem grupo" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Sem grupo</SelectItem>
+                      {groups.map((g) => (
+                        <SelectItem key={g.id} value={g.id}>
+                          {g.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {isAdmin && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      title="Gerenciar grupos"
+                      onClick={() => setIsGroupsOpen(true)}
+                      className="shrink-0"
+                    >
+                      <UsersRound className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+
               <div className="col-span-2 border-t pt-2 mt-1">
                 <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Endereço</h4>
               </div>
@@ -679,6 +767,85 @@ export default function ClientesPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Gerenciar Grupos */}
+      <Dialog open={isGroupsOpen} onOpenChange={setIsGroupsOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Grupos de clientes</DialogTitle>
+            <DialogDescription>
+              Crie grupos para organizar seus clientes e vincule-os no cadastro.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleAddGroup} className="flex items-end gap-2">
+            <div className="flex-1 space-y-1.5">
+              <Label htmlFor="new-group">Novo grupo</Label>
+              <Input
+                id="new-group"
+                value={newGroupName}
+                onChange={(e) => setNewGroupName(e.target.value)}
+                placeholder="Ex: Atacado, Revenda, VIP..."
+              />
+            </div>
+            <input
+              type="color"
+              value={newGroupColor}
+              onChange={(e) => setNewGroupColor(e.target.value)}
+              title="Cor do grupo"
+              className="h-9 w-10 shrink-0 cursor-pointer rounded border bg-transparent"
+            />
+            <Button type="submit" disabled={isSavingGroup} className="shrink-0">
+              {isSavingGroup ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            </Button>
+          </form>
+
+          <div className="max-h-72 space-y-1.5 overflow-y-auto">
+            {groups.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                Nenhum grupo cadastrado ainda.
+              </p>
+            ) : (
+              groups.map((g) => {
+                const count = customers.filter(
+                  (c) => (c as { group_id?: string | null }).group_id === g.id
+                ).length;
+                return (
+                  <div
+                    key={g.id}
+                    className="flex items-center justify-between gap-2 rounded-lg border p-2.5"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="h-3.5 w-3.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: g.color }}
+                      />
+                      <span className="text-sm font-medium">{g.name}</span>
+                      <Badge variant="secondary" className="text-[10px]">
+                        {count} cliente(s)
+                      </Badge>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleDeleteGroup(g.id)}
+                      className="h-8 w-8 text-rose-500 hover:bg-rose-500/10"
+                      title="Excluir grupo"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsGroupsOpen(false)} className="w-full">
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
