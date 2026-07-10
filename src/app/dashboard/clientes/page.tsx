@@ -600,15 +600,15 @@ export default function ClientesPage() {
 
       {/* Add/Edit Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
+        <DialogContent className="max-w-xl max-h-[90vh] flex flex-col">
+          <DialogHeader className="shrink-0">
             <DialogTitle>{editingCustomer ? "Editar Cliente" : "Novo Cliente"}</DialogTitle>
             <DialogDescription>
               Insira os dados do cliente e configure o limite de compras no crediário.
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleSaveCustomer} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+          <form onSubmit={handleSaveCustomer} className="flex min-h-0 flex-1 flex-col">
+            <div className="grid grid-cols-2 gap-4 flex-1 overflow-y-auto pr-1 py-1">
               <div className="col-span-2 space-y-1.5">
                 <Label htmlFor="full_name">Nome Completo *</Label>
                 <Input
@@ -802,7 +802,7 @@ export default function ClientesPage() {
               </div>
             </div>
 
-            <DialogFooter className="pt-4">
+            <DialogFooter className="shrink-0 border-t pt-4 mt-3">
               <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
                 Cancelar
               </Button>
