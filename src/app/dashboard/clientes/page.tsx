@@ -51,6 +51,13 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+// Máscara de CEP: 00000-000
+function maskCep(value: string): string {
+  const d = value.replace(/\D/g, "").slice(0, 8);
+  if (d.length <= 5) return d;
+  return `${d.slice(0, 5)}-${d.slice(5)}`;
+}
+
 // Máscara de telefone BR: (41) 99179-3307 (11 díg.) ou (41) 9179-3307 (10 díg.)
 function maskPhoneBR(value: string): string {
   const d = value.replace(/\D/g, "").slice(0, 11);
@@ -110,6 +117,40 @@ export default function ClientesPage() {
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [customerForm, setCustomerForm] = useState(emptyForm);
   const [isSaving, setIsSaving] = useState(false);
+  const [isCepLoading, setIsCepLoading] = useState(false);
+
+  // Busca o endereço pelo CEP (ViaCEP) e preenche os campos
+  async function fetchCep(cepDigits: string) {
+    setIsCepLoading(true);
+    try {
+      const res = await fetch(`https://viacep.com.br/ws/${cepDigits}/json/`);
+      const data = await res.json();
+      if (data.erro) {
+        toast.error("CEP não encontrado.");
+        return;
+      }
+      setCustomerForm((prev) => ({
+        ...prev,
+        address_street: data.logradouro || prev.address_street,
+        address_neighborhood: data.bairro || prev.address_neighborhood,
+        address_city: data.localidade || prev.address_city,
+        address_state: data.uf || prev.address_state,
+        address_complement: prev.address_complement || data.complemento || "",
+      }));
+      toast.success("Endereço preenchido pelo CEP!");
+    } catch {
+      toast.error("Não foi possível buscar o CEP. Verifique a conexão.");
+    } finally {
+      setIsCepLoading(false);
+    }
+  }
+
+  function handleCepChange(value: string) {
+    const masked = maskCep(value);
+    setCustomerForm((prev) => ({ ...prev, address_zip: masked }));
+    const digits = masked.replace(/\D/g, "");
+    if (digits.length === 8) fetchCep(digits);
+  }
 
   // Fetch Data
   const fetchCustomers = useCallback(async () => {
@@ -769,12 +810,21 @@ export default function ClientesPage() {
 
               <div className="space-y-1.5">
                 <Label htmlFor="address_zip">CEP</Label>
-                <Input
-                  id="address_zip"
-                  placeholder="00000-000"
-                  value={customerForm.address_zip}
-                  onChange={(e) => setCustomerForm({ ...customerForm, address_zip: e.target.value })}
-                />
+                <div className="relative">
+                  <Input
+                    id="address_zip"
+                    placeholder="00000-000"
+                    inputMode="numeric"
+                    value={customerForm.address_zip}
+                    onChange={(e) => handleCepChange(e.target.value)}
+                  />
+                  {isCepLoading && (
+                    <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+                  )}
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  Digite o CEP para preencher o endereço automaticamente.
+                </p>
               </div>
 
               <div className="col-span-2 space-y-1.5">

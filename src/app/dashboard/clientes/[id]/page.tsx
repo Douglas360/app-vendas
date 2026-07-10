@@ -87,6 +87,13 @@ function maskPhoneBR(value: string): string {
   return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
 }
 
+// Máscara de CEP: 00000-000
+function maskCep(value: string): string {
+  const d = value.replace(/\D/g, "").slice(0, 8);
+  if (d.length <= 5) return d;
+  return `${d.slice(0, 5)}-${d.slice(5)}`;
+}
+
 const PAYMENT_LABELS: Record<string, string> = {
   dinheiro: "Dinheiro",
   pix: "PIX",
@@ -193,6 +200,39 @@ export default function ClienteDetalhePage() {
   const [customerForm, setCustomerForm] = useState(emptyCustomerForm);
   const [isSavingCustomer, setIsSavingCustomer] = useState(false);
   const [groups, setGroups] = useState<{ id: string; name: string }[]>([]);
+  const [isCepLoading, setIsCepLoading] = useState(false);
+
+  async function fetchCep(cepDigits: string) {
+    setIsCepLoading(true);
+    try {
+      const res = await fetch(`https://viacep.com.br/ws/${cepDigits}/json/`);
+      const data = await res.json();
+      if (data.erro) {
+        toast.error("CEP não encontrado.");
+        return;
+      }
+      setCustomerForm((prev) => ({
+        ...prev,
+        address_street: data.logradouro || prev.address_street,
+        address_neighborhood: data.bairro || prev.address_neighborhood,
+        address_city: data.localidade || prev.address_city,
+        address_state: data.uf || prev.address_state,
+        address_complement: prev.address_complement || data.complemento || "",
+      }));
+      toast.success("Endereço preenchido pelo CEP!");
+    } catch {
+      toast.error("Não foi possível buscar o CEP.");
+    } finally {
+      setIsCepLoading(false);
+    }
+  }
+
+  function handleCepChange(value: string) {
+    const masked = maskCep(value);
+    setCustomerForm((prev) => ({ ...prev, address_zip: masked }));
+    const digits = masked.replace(/\D/g, "");
+    if (digits.length === 8) fetchCep(digits);
+  }
 
   useEffect(() => {
     supabase
@@ -1726,11 +1766,21 @@ export default function ClienteDetalhePage() {
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="ec-zip">CEP</Label>
-                <Input
-                  id="ec-zip"
-                  value={customerForm.address_zip}
-                  onChange={(e) => setCustomerForm({ ...customerForm, address_zip: e.target.value })}
-                />
+                <div className="relative">
+                  <Input
+                    id="ec-zip"
+                    placeholder="00000-000"
+                    inputMode="numeric"
+                    value={customerForm.address_zip}
+                    onChange={(e) => handleCepChange(e.target.value)}
+                  />
+                  {isCepLoading && (
+                    <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+                  )}
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  Digite o CEP para preencher o endereço automaticamente.
+                </p>
               </div>
 
               <div className="col-span-2 space-y-1.5">
