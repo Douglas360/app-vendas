@@ -120,6 +120,7 @@ const emptyCustomerForm = {
   credit_limit: "0",
   notes: "",
   is_active: true,
+  group_id: "",
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -191,6 +192,18 @@ export default function ClienteDetalhePage() {
   const [isEditCustomerOpen, setIsEditCustomerOpen] = useState(false);
   const [customerForm, setCustomerForm] = useState(emptyCustomerForm);
   const [isSavingCustomer, setIsSavingCustomer] = useState(false);
+  const [groups, setGroups] = useState<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    supabase
+      .from("customer_groups")
+      .select("id, name")
+      .order("name")
+      .then((res: { data: { id: string; name: string }[] | null }) =>
+        setGroups(res.data || [])
+      );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Edit installment dialog
   const [editInstallment, setEditInstallment] = useState<InstallmentRow | null>(null);
@@ -487,6 +500,7 @@ export default function ClienteDetalhePage() {
       credit_limit: customer.credit_limit.toString(),
       notes: customer.notes || "",
       is_active: customer.is_active,
+      group_id: (customer as { group_id?: string | null }).group_id || "",
     });
     setIsEditCustomerOpen(true);
   }
@@ -524,6 +538,7 @@ export default function ClienteDetalhePage() {
           credit_limit: parseFloat(customerForm.credit_limit) || 0,
           notes: customerForm.notes || null,
           is_active: customerForm.is_active,
+          group_id: customerForm.group_id || null,
         })
         .eq("id", customer.id);
       if (error) throw error;
@@ -1626,6 +1641,28 @@ export default function ClienteDetalhePage() {
                   onChange={(e) => setCustomerForm({ ...customerForm, credit_limit: e.target.value })}
                   required
                 />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Grupo</Label>
+                <Select
+                  value={customerForm.group_id || "none"}
+                  onValueChange={(v) =>
+                    setCustomerForm({ ...customerForm, group_id: v === "none" ? "" : v })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Sem grupo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sem grupo</SelectItem>
+                    {groups.map((g) => (
+                      <SelectItem key={g.id} value={g.id}>
+                        {g.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="col-span-2 border-t pt-2 mt-1">

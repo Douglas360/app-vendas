@@ -70,6 +70,7 @@ export default function ClientesPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [groupFilter, setGroupFilter] = useState("all");
   const [showValues, setShowValues] = useState(true);
   const money = (v: number) =>
     showValues ? `R$ ${v.toFixed(2)}` : "R$ ••••";
@@ -172,14 +173,21 @@ export default function ClientesPage() {
   }
 
   // Filter
+  const groupById = (id: string | null | undefined) =>
+    id ? groups.find((g) => g.id === id) : undefined;
+
   const filteredCustomers = customers.filter((cust) => {
     const term = search.toLowerCase();
-    return (
+    const gid = (cust as { group_id?: string | null }).group_id || "";
+    const matchGroup =
+      groupFilter === "all" ||
+      (groupFilter === "none" ? !gid : gid === groupFilter);
+    const matchTerm =
       cust.full_name.toLowerCase().includes(term) ||
       (cust.email && cust.email.toLowerCase().includes(term)) ||
       (cust.phone && cust.phone.includes(term)) ||
-      (cust.cpf_cnpj && cust.cpf_cnpj.includes(term))
-    );
+      (cust.cpf_cnpj && cust.cpf_cnpj.includes(term));
+    return matchGroup && matchTerm;
   });
 
   // Totals
@@ -398,8 +406,8 @@ export default function ClientesPage() {
 
       {/* Search Filter */}
       <Card className="border shadow-sm">
-        <CardContent className="p-4">
-          <div className="relative">
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
+          <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="Buscar por nome, e-mail, telefone ou CPF..."
@@ -407,6 +415,22 @@ export default function ClientesPage() {
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9"
             />
+          </div>
+          <div className="w-full sm:w-56">
+            <Select value={groupFilter} onValueChange={setGroupFilter}>
+              <SelectTrigger>
+                <SelectValue placeholder="Todos os grupos" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos os grupos</SelectItem>
+                <SelectItem value="none">Sem grupo</SelectItem>
+                {groups.map((g) => (
+                  <SelectItem key={g.id} value={g.id}>
+                    {g.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </CardContent>
       </Card>
@@ -451,6 +475,18 @@ export default function ClientesPage() {
                         >
                           {cust.full_name}
                         </button>
+                        {(() => {
+                          const g = groupById((cust as { group_id?: string | null }).group_id);
+                          return g ? (
+                            <span className="mt-0.5 flex items-center gap-1 text-[11px] font-normal text-muted-foreground">
+                              <span
+                                className="h-2 w-2 rounded-full"
+                                style={{ backgroundColor: g.color }}
+                              />
+                              {g.name}
+                            </span>
+                          ) : null;
+                        })()}
                       </TableCell>
                       <TableCell className="text-sm">
                         <div className="space-y-0.5">
@@ -534,6 +570,18 @@ export default function ClientesPage() {
                         <span className="text-rose-500"> · deve {money(cust.current_debt)}</span>
                       )}
                     </p>
+                    {(() => {
+                      const g = groupById((cust as { group_id?: string | null }).group_id);
+                      return g ? (
+                        <span className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+                          <span
+                            className="h-2 w-2 rounded-full"
+                            style={{ backgroundColor: g.color }}
+                          />
+                          {g.name}
+                        </span>
+                      ) : null;
+                    })()}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     {!cust.is_active && (
