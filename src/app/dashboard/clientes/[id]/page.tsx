@@ -13,7 +13,7 @@ import type {
 } from "@/lib/types/database";
 import { getStoreInfo, type ReceiptData } from "@/lib/receipt";
 import {
-  sendReceiptToWhatsapp,
+  buildWhatsappReceipt,
   buildPaymentMessage,
   buildCollectionMessage,
   buildWhatsappLink,
@@ -445,7 +445,7 @@ export default function ClienteDetalhePage() {
       toast.success("Compra atualizada com sucesso!");
       setIsEditSaleOpen(false);
 
-      // Reenvia o comprovante no WhatsApp do cliente
+      // Abre o WhatsApp com o comprovante atualizado pronto para enviar
       if (customer?.phone) {
         try {
           const method = editSale.payments?.[0]?.method || "dinheiro";
@@ -483,10 +483,13 @@ export default function ClienteDetalhePage() {
             paymentMethodLabel: PAYMENT_LABELS[method] || method,
             installments,
           };
-          const sent = await sendReceiptToWhatsapp(supabase, receipt, customer.phone);
-          if (sent) toast.success("Comprovante atualizado enviado no WhatsApp!");
+          setWaPrompt({
+            phone: customer.phone,
+            message: buildWhatsappReceipt(receipt),
+            title: `Comprovante atualizado — venda #${editSale.sale_number}`,
+          });
         } catch {
-          toast.error("Compra salva, mas falhou ao enviar o comprovante no WhatsApp.");
+          /* comprovante é opcional */
         }
       }
 
