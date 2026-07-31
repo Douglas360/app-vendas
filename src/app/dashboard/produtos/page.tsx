@@ -404,13 +404,16 @@ export default function ProdutosPage() {
     setIsStylizing(true);
     const toastId = toast.loading("IA criando imagem premium...");
     try {
-      // Obtém a imagem atual como Blob (arquivo enviado ou imagem já salva)
-      let srcBlob: Blob;
+      // Converte a imagem atual em base64 (arquivo enviado ou imagem já salva)
+      let base64Data = "";
+      let mimeType = "image/png";
       if (imageFile) {
-        srcBlob = imageFile;
+        base64Data = await fileToBase64(imageFile);
+        mimeType = imageFile.type || "image/png";
       } else if (currentImageUrl) {
-        const r = await fetch(currentImageUrl);
-        srcBlob = await r.blob();
+        const r = await urlToBase64(currentImageUrl);
+        base64Data = r.data;
+        mimeType = r.mimeType || "image/png";
       } else {
         throw new Error("Nenhuma imagem disponível para estilizar.");
       }
@@ -424,35 +427,17 @@ export default function ProdutosPage() {
         "Enquadramento centralizado, produto em destaque, nítido, alta resolução e aparência sofisticada, digna de post no WhatsApp. " +
         "Sem texto, sem marca d'água e sem pessoas.";
 
-      const form = new FormData();
-      form.append("model", "gpt-image-1");
-      form.append("image", srcBlob, "produto.png");
-      form.append("prompt", prompt);
-      form.append("size", "1024x1024");
-      form.append("quality", "high");
-      form.append("input_fidelity", "high");
-      form.append("n", "1");
-
-      const response = await fetch("https://api.openai.com/v1/images/edits", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}` },
-        body: form,
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(
-          errData.error?.message || "Erro na chamada da API da OpenAI."
-        );
+      // Chama a OpenAI pelo SERVIDOR (evita bloqueio de CORS do navegador)
+      const { data: result, error: fnError } = await supabase.functions.invoke(
+        "stylize-image",
+        { body: { imageBase64: base64Data, mimeType, apiKey, prompt } }
+      );
+      if (fnError) throw new Error(fnError.message);
+      if (!result?.ok) {
+        throw new Error(result?.error || "Falha ao gerar a imagem.");
       }
 
-      const data = await response.json();
-      const b64 = data.data?.[0]?.b64_json;
-      if (!b64) {
-        throw new Error("A IA não retornou uma imagem. Tente novamente.");
-      }
-
-      const outFile = base64ToFile(b64, "image/png");
+      const outFile = base64ToFile(result.b64, "image/png");
 
       // Guarda o estado atual para permitir "Desfazer"
       setStylizeBackup({
