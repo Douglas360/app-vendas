@@ -655,6 +655,87 @@ export default function ClienteDetalhePage() {
     setIsPaymentOpen(true);
   }
 
+  // Pagamento avulso: abate um valor livre nas parcelas em aberto
+  const [isBulkPayOpen, setIsBulkPayOpen] = useState(false);
+  const [bulkAmount, setBulkAmount] = useState("");
+  const [bulkMethod, setBulkMethod] = useState("dinheiro");
+  const [isBulkPaying, setIsBulkPaying] = useState(false);
+
+  const totalOpenDebt = installments
+    .filter((i) => i.status === "pendente" || i.status === "atrasado")
+    .reduce((s, i) => s + (i.amount - i.amount_paid), 0);
+
+  async function handleBulkPay(e: React.FormEvent) {
+    e.preventDefault();
+    if (!customer) return;
+    const amount = parseFloat(bulkAmount);
+    if (isNaN(amount) || amount <= 0) {
+      toast.error("Informe um valor válido.");
+      return;
+    }
+    if (amount > totalOpenDebt + 0.001) {
+      toast.error("Valor maior que o total devido", {
+        description: `O total em aberto é ${currency(totalOpenDebt)}.`,
+      });
+      return;
+    }
+    setIsBulkPaying(true);
+    try {
+      const { data, error } = await supabase.rpc("pay_customer_amount", {
+        p_customer_id: customer.id,
+        p_amount: amount,
+        p_method: bulkMethod,
+      });
+      if (error) throw error;
+
+      const res = data as {
+        applied: number;
+        remaining_debt: number;
+        installments: { installment_number: number; applied: number }[];
+      };
+      const parts = (res.installments || [])
+        .map(
+          (i) => `${i.installment_number}ª (${currency(Number(i.applied))})`
+        )
+        .join(", ");
+      toast.success("Pagamento registrado!", {
+        description: `Abatido em: ${parts}. Restante devido: ${currency(
+          Number(res.remaining_debt)
+        )}.`,
+      });
+      setIsBulkPayOpen(false);
+
+      // Abre o WhatsApp com a confirmação pronta
+      if (customer.phone) {
+        const store = getStoreInfo();
+        const firstName = customer.full_name.split(" ")[0] || customer.full_name;
+        const lines = [
+          `*${store.name}*`,
+          "✅ *Pagamento recebido!*",
+          "",
+          `Olá ${firstName}, confirmamos o recebimento de *${currency(amount)}*.`,
+        ];
+        if (Number(res.remaining_debt) > 0) {
+          lines.push(`Saldo devedor atual: *${currency(Number(res.remaining_debt))}*`);
+        } else {
+          lines.push("Você está com tudo em dia. Obrigado! 🙏");
+        }
+        setWaPrompt({
+          phone: customer.phone,
+          message: lines.join("\n"),
+          title: "Confirmação de pagamento",
+        });
+      }
+
+      await loadData();
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Tente novamente.";
+      toast.error("Erro ao registrar o pagamento", { description: message });
+    } finally {
+      setIsBulkPaying(false);
+    }
+  }
+
   // Cobrança manual da parcela: abre o WhatsApp do cliente com a mensagem pronta
   const [waPrompt, setWaPrompt] = useState<{
     phone: string;
@@ -1183,11 +1264,25 @@ export default function ClienteDetalhePage() {
             )}
 
             <Card className="border shadow-sm overflow-hidden">
-              <CardHeader className="py-3 border-b bg-muted/20">
+              <CardHeader className="flex flex-row items-center justify-between py-3 border-b bg-muted/20">
                 <CardTitle className="text-sm font-bold flex items-center gap-1.5">
                   <Calendar className="h-4 w-4" />
                   Parcelas
                 </CardTitle>
+                {pendingInstallments.length > 0 && (
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setBulkAmount("");
+                      setBulkMethod("dinheiro");
+                      setIsBulkPayOpen(true);
+                    }}
+                    className="h-8 bg-emerald-600 px-3 text-xs font-bold text-white hover:bg-emerald-700"
+                  >
+                    <Wallet className="mr-1.5 h-3.5 w-3.5" />
+                    Receber pagamento
+                  </Button>
+                )}
               </CardHeader>
               {installments.length === 0 ? (
                 <div className="flex h-40 flex-col items-center justify-center gap-2 p-4 text-center">
@@ -1983,6 +2078,85 @@ export default function ClienteDetalhePage() {
               </DialogFooter>
             </form>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Diálogo: pagamento avulso (abate no total devido) */}
+      <Dialog open={isBulkPayOpen} onOpenChange={setIsBulkPayOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Receber pagamento</DialogTitle>
+            <DialogDescription>
+              O valor será abatido nas parcelas em aberto, das mais antigas para as mais
+              novas.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleBulkPay} className="space-y-4">
+            <div className="rounded-lg bg-rose-500/5 border border-rose-500/20 p-3 text-sm">
+              <span className="text-muted-foreground">Total devido: </span>
+              <span className="font-bold text-rose-600">{currency(totalOpenDebt)}</span>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="bulk-amount">Valor recebido (R$) *</Label>
+              <Input
+                id="bulk-amount"
+                type="number"
+                step="0.01"
+                min="0.01"
+                max={totalOpenDebt.toFixed(2)}
+                value={bulkAmount}
+                onChange={(e) => setBulkAmount(e.target.value)}
+                placeholder="0,00"
+                autoFocus
+                required
+              />
+              <div className="flex gap-1.5 pt-1">
+                {[0.25, 0.5, 1].map((f) => (
+                  <Button
+                    key={f}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setBulkAmount((totalOpenDebt * f).toFixed(2))}
+                    className="h-7 flex-1 text-xs"
+                  >
+                    {f === 1 ? "Tudo" : `${f * 100}%`}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Forma de pagamento</Label>
+              <Select value={bulkMethod} onValueChange={setBulkMethod}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="dinheiro">Dinheiro</SelectItem>
+                  <SelectItem value="pix">PIX</SelectItem>
+                  <SelectItem value="cartao_debito">Cartão Débito</SelectItem>
+                  <SelectItem value="cartao_credito">Cartão Crédito</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsBulkPayOpen(false)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                disabled={isBulkPaying}
+                className="bg-emerald-600 text-white hover:bg-emerald-700"
+              >
+                {isBulkPaying && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Confirmar recebimento
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
