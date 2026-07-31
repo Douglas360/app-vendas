@@ -61,7 +61,6 @@ import Image from "next/image";
 import { toast } from "sonner";
 
 const PRODUCT_IMAGES_BUCKET = "product-images";
-const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
 const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
 // Carrega a biblioteca SheetJS (XLSX) via CDN, uma única vez
@@ -770,12 +769,6 @@ export default function ProdutosPage() {
     if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
       toast.error("Formato inválido", {
         description: "Use uma imagem JPG, PNG, WEBP ou GIF.",
-      });
-      return;
-    }
-    if (file.size > MAX_IMAGE_SIZE) {
-      toast.error("Imagem muito grande", {
-        description: "O tamanho máximo é 5MB.",
       });
       return;
     }
@@ -2097,7 +2090,7 @@ export default function ProdutosPage() {
                       )}
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      JPG, PNG, WEBP ou GIF. Máx. 5MB. <span className="font-medium">Estilizar imagem</span> gera uma versão premium (fundo de estúdio) da foto para divulgar.
+                      JPG, PNG, WEBP ou GIF. <span className="font-medium">Estilizar imagem</span> gera uma versão premium (fundo de estúdio) da foto para divulgar.
                     </p>
                   </div>
                 </div>
