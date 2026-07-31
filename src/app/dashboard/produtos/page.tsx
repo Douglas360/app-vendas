@@ -370,6 +370,41 @@ export default function ProdutosPage() {
     }
   }
 
+  // Reconverte qualquer imagem (Blob ou URL) para PNG base64, normalizando o
+  // formato/modo e limitando o tamanho — evita "invalid image file" na OpenAI.
+  function toPngBase64(src: Blob | string, maxSize = 1024): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const img = document.createElement("img");
+      img.crossOrigin = "anonymous";
+      const isBlob = typeof src !== "string";
+      img.onload = () => {
+        try {
+          let w = img.naturalWidth || img.width;
+          let h = img.naturalHeight || img.height;
+          const scale = Math.min(1, maxSize / Math.max(w, h));
+          w = Math.max(1, Math.round(w * scale));
+          h = Math.max(1, Math.round(h * scale));
+          const canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext("2d")!;
+          ctx.drawImage(img, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL("image/png");
+          if (isBlob) URL.revokeObjectURL(img.src);
+          resolve(dataUrl.split(",")[1]);
+        } catch (e) {
+          if (isBlob) URL.revokeObjectURL(img.src);
+          reject(e);
+        }
+      };
+      img.onerror = () => {
+        if (isBlob) URL.revokeObjectURL(img.src);
+        reject(new Error("Falha ao carregar a imagem para conversão."));
+      };
+      img.src = isBlob ? URL.createObjectURL(src as Blob) : (src as string);
+    });
+  }
+
   // Converte base64 (retornado pela IA) em um File pronto para upload
   function base64ToFile(b64: string, mime: string): File {
     const bin = atob(b64);
@@ -404,16 +439,13 @@ export default function ProdutosPage() {
     setIsStylizing(true);
     const toastId = toast.loading("IA criando imagem premium...");
     try {
-      // Converte a imagem atual em base64 (arquivo enviado ou imagem já salva)
+      // Normaliza a imagem para PNG (evita erro de formato/modo na OpenAI)
       let base64Data = "";
-      let mimeType = "image/png";
+      const mimeType = "image/png";
       if (imageFile) {
-        base64Data = await fileToBase64(imageFile);
-        mimeType = imageFile.type || "image/png";
+        base64Data = await toPngBase64(imageFile);
       } else if (currentImageUrl) {
-        const r = await urlToBase64(currentImageUrl);
-        base64Data = r.data;
-        mimeType = r.mimeType || "image/png";
+        base64Data = await toPngBase64(currentImageUrl);
       } else {
         throw new Error("Nenhuma imagem disponível para estilizar.");
       }
