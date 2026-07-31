@@ -7,13 +7,13 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import {
   Search,
   MessageCircle,
   Loader2,
   Package,
-  X,
   Sparkles,
 } from "lucide-react";
 
@@ -48,7 +48,6 @@ export default function CatalogoPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState<string>("all");
-  const [selected, setSelected] = useState<CatalogProduct | null>(null);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -197,9 +196,9 @@ export default function CatalogoPage() {
                 key={p.id}
                 className="group flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg"
               >
-                <button
-                  onClick={() => setSelected(p)}
-                  className="relative aspect-square w-full overflow-hidden bg-zinc-100"
+                <Link
+                  href={`/catalogo/${p.id}`}
+                  className="relative block aspect-square w-full overflow-hidden bg-zinc-100"
                 >
                   {p.image_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -219,11 +218,14 @@ export default function CatalogoPage() {
                       Esgotado
                     </span>
                   )}
-                </button>
+                </Link>
                 <div className="flex flex-1 flex-col p-3">
-                  <h3 className="line-clamp-2 text-sm font-semibold leading-snug">
+                  <Link
+                    href={`/catalogo/${p.id}`}
+                    className="line-clamp-2 text-sm font-semibold leading-snug transition-colors hover:text-indigo-600"
+                  >
                     {p.name}
-                  </h3>
+                  </Link>
                   <p className="mt-1.5 text-lg font-extrabold text-indigo-600">
                     {p.hasVar && p.minPrice !== p.maxPrice ? (
                       <>
@@ -257,67 +259,6 @@ export default function CatalogoPage() {
         {storeName} · Catálogo online — peça pelo WhatsApp
       </footer>
 
-      {/* Detalhe do produto */}
-      {selected && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
-          onClick={() => setSelected(null)}
-        >
-          <div
-            className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl bg-white sm:rounded-3xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="relative aspect-square w-full bg-zinc-100">
-              {selected.image_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={selected.image_url}
-                  alt={selected.name}
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center text-zinc-300">
-                  <Package className="h-16 w-16" />
-                </div>
-              )}
-              <button
-                onClick={() => setSelected(null)}
-                className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur transition hover:bg-black/70"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="p-5">
-              <h2 className="text-xl font-bold">{selected.name}</h2>
-              {selected.description && (
-                <p className="mt-2 text-sm leading-relaxed text-zinc-500">
-                  {selected.description}
-                </p>
-              )}
-              <p className="mt-3 text-2xl font-extrabold text-indigo-600">
-                {brl(
-                  (items.find((i) => i.id === selected.id) || { minPrice: selected.sale_price })
-                    .minPrice
-                )}
-              </p>
-              <a
-                href={waLink(
-                  items.find((i) => i.id === selected.id) || {
-                    name: selected.name,
-                    minPrice: selected.sale_price,
-                  }
-                )}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-4 flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 py-3.5 text-sm font-bold text-white transition hover:bg-emerald-700"
-              >
-                <MessageCircle className="h-4 w-4" />
-                Comprar pelo WhatsApp
-              </a>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
