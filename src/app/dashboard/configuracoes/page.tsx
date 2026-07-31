@@ -129,10 +129,14 @@ export default function ConfiguracoesPage() {
       return;
     }
     saveStoreInfo(store);
-    // Persiste nome da loja e chave PIX no banco (usados nos lembretes do WhatsApp)
+    // Persiste nome da loja, chave PIX e WhatsApp do catálogo no banco
     await supabase
       .from("app_settings")
-      .update({ store_name: store.name.trim(), pix_key: (store.pixKey || "").trim() })
+      .update({
+        store_name: store.name.trim(),
+        pix_key: (store.pixKey || "").trim(),
+        store_whatsapp: storeWhatsapp.replace(/\D/g, ""),
+      })
       .eq("id", 1);
     toast.success("Dados da loja salvos!", {
       description: "Aparecerão no cabeçalho dos recibos.",
@@ -173,10 +177,12 @@ export default function ConfiguracoesPage() {
   const [waReminders, setWaReminders] = useState(true);
 
   // Carrega a preferência de lembrete automático ao cliente
+  const [storeWhatsapp, setStoreWhatsapp] = useState("");
+
   useEffect(() => {
     supabase
       .from("app_settings")
-      .select("wa_reminders_enabled, pix_key, store_name")
+      .select("wa_reminders_enabled, pix_key, store_name, store_whatsapp")
       .eq("id", 1)
       .single()
       .then(
@@ -185,10 +191,12 @@ export default function ConfiguracoesPage() {
             wa_reminders_enabled: boolean;
             pix_key: string | null;
             store_name: string | null;
+            store_whatsapp: string | null;
           } | null;
         }) => {
           if (!res.data) return;
           setWaReminders(!!res.data.wa_reminders_enabled);
+          setStoreWhatsapp(res.data.store_whatsapp || "");
           // Semeia PIX/nome do banco caso ainda não estejam salvos localmente
           setStore((prev) => {
             const next = { ...prev };
@@ -678,6 +686,48 @@ export default function ConfiguracoesPage() {
                 <p className="text-[10px] text-muted-foreground">
                   Aparece no recibo e nas cobranças de crediário enviadas ao cliente.
                 </p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="store-wa">WhatsApp do Catálogo</Label>
+                <Input
+                  id="store-wa"
+                  value={storeWhatsapp}
+                  onChange={(e) => setStoreWhatsapp(e.target.value)}
+                  placeholder="41999999999 (DDD + número)"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Número que recebe os pedidos do botão &ldquo;Comprar&rdquo; do catálogo online.
+                </p>
+              </div>
+              <div className="col-span-2 space-y-1.5 rounded-lg border border-indigo-500/20 bg-indigo-500/5 p-3">
+                <Label>Catálogo online (vitrine pública)</Label>
+                <p className="text-xs text-muted-foreground">
+                  Compartilhe este link com seus clientes para verem os produtos e pedirem pelo WhatsApp.
+                </p>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const url = `${window.location.origin}/catalogo`;
+                      navigator.clipboard
+                        .writeText(url)
+                        .then(() => toast.success("Link do catálogo copiado!"))
+                        .catch(() => toast.error("Não foi possível copiar."));
+                    }}
+                  >
+                    Copiar link
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => window.open("/catalogo", "_blank")}
+                    className="bg-indigo-600 text-white hover:bg-indigo-700"
+                  >
+                    Abrir catálogo
+                  </Button>
+                </div>
               </div>
               <div className="space-y-1.5 sm:col-span-2">
                 <Label htmlFor="store-address">Endereço</Label>
