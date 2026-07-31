@@ -53,6 +53,7 @@ import {
   Share2,
   Wand2,
   Undo2,
+  History,
 } from "lucide-react";
 import { getStoreInfo } from "@/lib/receipt";
 import { generateStoryBlob, slugify } from "@/lib/story";
@@ -100,6 +101,68 @@ export default function ProdutosPage() {
   // Product Dialog State
   const [isProductDialogOpen, setIsProductDialogOpen] = useState(false);
   const [viewImageUrl, setViewImageUrl] = useState<string | null>(null);
+
+  // Histórico de vendas do produto
+  interface ProductSaleRow {
+    id: string;
+    quantity: number;
+    unit_price: number;
+    total: number;
+    variantName: string | null;
+    saleNumber: number | string;
+    saleDate: string | null;
+    saleStatus: string;
+    customerName: string;
+  }
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [historyProduct, setHistoryProduct] = useState<Product | null>(null);
+  const [historyRows, setHistoryRows] = useState<ProductSaleRow[]>([]);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+
+  async function handleOpenHistory(product: Product) {
+    setHistoryProduct(product);
+    setIsHistoryOpen(true);
+    setIsHistoryLoading(true);
+    try {
+      // Inclui as variações do produto
+      const children = products.filter((p) => p.parent_id === product.id);
+      const ids = [product.id, ...children.map((c) => c.id)];
+      const { data, error } = await supabase
+        .from("sale_items")
+        .select(
+          "id, quantity, unit_price, total, product_id, sale:sales(sale_number, created_at, status, customer:customers(full_name))"
+        )
+        .in("product_id", ids)
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (error) throw error;
+      const rows: ProductSaleRow[] = ((data as any[]) || []).map((it) => {
+        const child = children.find((c) => c.id === it.product_id);
+        const variantName = child?.attributes
+          ? Object.values(child.attributes as Record<string, string>)
+              .filter(Boolean)
+              .join(" / ")
+          : null;
+        return {
+          id: it.id,
+          quantity: Number(it.quantity),
+          unit_price: Number(it.unit_price),
+          total: Number(it.total),
+          variantName,
+          saleNumber: it.sale?.sale_number ?? "?",
+          saleDate: it.sale?.created_at ?? null,
+          saleStatus: it.sale?.status ?? "",
+          customerName: it.sale?.customer?.full_name || "Cliente Balcão",
+        };
+      });
+      setHistoryRows(rows);
+    } catch (error: any) {
+      toast.error("Erro ao carregar o histórico", { description: error.message });
+      setHistoryRows([]);
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  }
   const [nameColWidth, setNameColWidth] = useState<number>(() => {
     if (typeof window !== "undefined") {
       const v = parseInt(localStorage.getItem("app_vendas_name_col_width") || "");
@@ -1825,6 +1888,15 @@ export default function ProdutosPage() {
                             <Button
                               variant="ghost"
                               size="icon"
+                              onClick={() => handleOpenHistory(prod)}
+                              title="Histórico de vendas"
+                              className="h-8 w-8 text-indigo-500 hover:text-indigo-600 hover:bg-indigo-500/10"
+                            >
+                              <History className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
                               onClick={() => handleEditProduct(prod)}
                               title="Editar"
                               className="h-8 w-8 text-blue-500 hover:text-blue-600 hover:bg-blue-500/10"
@@ -1945,6 +2017,15 @@ export default function ProdutosPage() {
                   </button>
                   {isAdmin && (
                     <div className="flex shrink-0 items-center">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleOpenHistory(prod)}
+                        title="Histórico de vendas"
+                        className="h-8 w-8 text-indigo-500 hover:bg-indigo-500/10 hover:text-indigo-600"
+                      >
+                        <History className="h-4 w-4" />
+                      </Button>
                       <Button
                         variant="ghost"
                         size="icon"
@@ -2749,6 +2830,99 @@ export default function ProdutosPage() {
 
           <DialogFooter className="pt-2">
             <Button variant="outline" onClick={() => setIsCategoryDialogOpen(false)} className="w-full">
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Histórico de vendas do produto */}
+      <Dialog open={isHistoryOpen} onOpenChange={(o) => !o && setIsHistoryOpen(false)}>
+        <DialogContent className="max-w-lg max-h-[90vh] flex flex-col">
+          <DialogHeader className="shrink-0">
+            <DialogTitle className="flex items-center gap-2">
+              <History className="h-5 w-5 text-indigo-500" />
+              Histórico de vendas
+            </DialogTitle>
+            <DialogDescription>{historyProduct?.name}</DialogDescription>
+          </DialogHeader>
+
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {isHistoryLoading ? (
+              <div className="flex h-40 items-center justify-center">
+                <Loader2 className="h-7 w-7 animate-spin text-indigo-500" />
+              </div>
+            ) : historyRows.length === 0 ? (
+              <div className="flex h-40 flex-col items-center justify-center gap-2 text-center">
+                <Package className="h-9 w-9 text-muted-foreground/40" />
+                <p className="text-sm text-muted-foreground">
+                  Este produto ainda não foi vendido.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="mb-3 flex items-center justify-between rounded-lg bg-indigo-500/5 px-3 py-2 text-sm">
+                  <span className="text-muted-foreground">
+                    {historyRows
+                      .filter((r) => r.saleStatus === "finalizada")
+                      .reduce((s, r) => s + r.quantity, 0)}{" "}
+                    unidade(s) vendidas
+                  </span>
+                  <span className="font-bold text-indigo-600">
+                    {historyRows
+                      .filter((r) => r.saleStatus === "finalizada")
+                      .reduce((s, r) => s + r.total, 0)
+                      .toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                  </span>
+                </div>
+                <div className="divide-y rounded-lg border">
+                  {historyRows.map((r) => (
+                    <div
+                      key={r.id}
+                      className="flex items-center justify-between gap-3 p-2.5"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold">
+                          {r.customerName}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Venda #{r.saleNumber} ·{" "}
+                          {r.saleDate
+                            ? new Date(r.saleDate).toLocaleDateString("pt-BR")
+                            : "—"}{" "}
+                          · {r.quantity}x{r.variantName ? ` · ${r.variantName}` : ""}
+                          {r.saleStatus === "cancelada" && (
+                            <span className="ml-1 font-semibold text-rose-500">
+                              (cancelada)
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                      <span
+                        className={`shrink-0 text-sm font-bold ${
+                          r.saleStatus === "cancelada"
+                            ? "text-muted-foreground line-through"
+                            : "text-foreground"
+                        }`}
+                      >
+                        {r.total.toLocaleString("pt-BR", {
+                          style: "currency",
+                          currency: "BRL",
+                        })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
+          <DialogFooter className="shrink-0 border-t pt-3">
+            <Button
+              variant="outline"
+              onClick={() => setIsHistoryOpen(false)}
+              className="w-full"
+            >
               Fechar
             </Button>
           </DialogFooter>
