@@ -108,15 +108,15 @@ export default function VendasPage() {
     setIsCancelling(true);
 
     try {
-      // Update sale status to cancelada (database trigger automatically handles stock recovery)
-      const { error } = await supabase
-        .from("sales")
-        .update({ status: "cancelada" })
-        .eq("id", saleId);
+      // Usa a RPC transacional: estorna estoque, cancela parcelas/pagamentos
+      // e remove as entradas do caixa desta venda.
+      const { error } = await supabase.rpc("cancel_sale", { p_sale_id: saleId });
 
       if (error) throw error;
 
-      toast.success("Venda cancelada com sucesso!");
+      toast.success("Venda cancelada com sucesso!", {
+        description: "Estoque devolvido e parcelas do crediário canceladas.",
+      });
       setIsDetailsOpen(false);
       fetchSales();
     } catch (error: any) {
