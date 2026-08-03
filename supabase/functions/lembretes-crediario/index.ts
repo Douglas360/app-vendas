@@ -59,6 +59,10 @@ function applyTemplate(tpl: string, vars: Record<string, string>): string {
     .trim();
 }
 
+// Intervalo entre envios de WhatsApp (evita rajada e reduz risco de bloqueio)
+const WA_DELAY_MS = 10000;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 // Mensagem para o cliente conforme o vencimento (usa os modelos editáveis)
 function buildCustomerMessage(
   bucket: string,
@@ -285,6 +289,8 @@ Deno.serve(async (req) => {
               .select("id")
               .single();
             try {
+              // Espaça os envios (menos o primeiro) para não disparar em rajada
+              if (results.waSent > 0) await sleep(WA_DELAY_MS);
               await sendWhatsAppText(number, msg);
               results.waSent++;
               if (nlog?.id)
