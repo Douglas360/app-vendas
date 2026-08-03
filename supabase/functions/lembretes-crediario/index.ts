@@ -31,6 +31,11 @@ function normalizePhone(phone: string): string {
 
 // Modelos padrão (iguais aos do app). Sobrescritos por app_settings.message_templates.
 const DEFAULT_TEMPLATES: Record<string, string> = {
+  lembrete_3dias:
+    "Olá, {primeiro_nome}.\n\n" +
+    "Lembrete: a parcela de *{valor}* referente à sua compra vence em *{vencimento}* (daqui a 3 dias).\n\n" +
+    "Você pode efetuar o pagamento via PIX na chave *{pix}*. Após o pagamento, envie o comprovante por aqui.\n\n" +
+    "Caso o pagamento já tenha sido efetuado, desconsidere esta mensagem.\n\n{loja}",
   lembrete_vespera:
     "Olá, {primeiro_nome}.\n\n" +
     "Lembrete: a parcela de *{valor}* referente à sua compra vence *amanhã ({vencimento})*.\n\n" +
@@ -70,6 +75,8 @@ function buildCustomerMessage(
       ? "lembrete_atraso"
       : bucket === "hoje"
       ? "lembrete_hoje"
+      : bucket === "tres_dias"
+      ? "lembrete_3dias"
       : "lembrete_vespera";
   const tpl = templates[key] || DEFAULT_TEMPLATES[key];
   return applyTemplate(tpl, {
@@ -156,15 +163,18 @@ Deno.serve(async (req) => {
 
     const todayStr = ymdInTZ(0);
     const tomorrowStr = ymdInTZ(1);
+    const threeDaysStr = ymdInTZ(3);
 
-    // Parcelas em aberto que vencem hoje, amanhã ou já atrasadas
+    // Parcelas em aberto: 3 dias antes, véspera, no dia e atrasadas
     const { data: insts, error: instErr } = await supabase
       .from("credit_installments")
       .select(
         "id, installment_number, amount, amount_paid, due_date, status, sale_id, customer:customers(id, full_name, current_debt, phone), sale:sales(sale_number)"
       )
       .in("status", ["pendente", "atrasado"])
-      .or(`due_date.eq.${todayStr},due_date.eq.${tomorrowStr},due_date.lt.${todayStr}`)
+      .or(
+        `due_date.eq.${todayStr},due_date.eq.${tomorrowStr},due_date.eq.${threeDaysStr},due_date.lt.${todayStr}`
+      )
       .order("due_date", { ascending: true });
 
     if (instErr) throw instErr;
@@ -219,7 +229,8 @@ Deno.serve(async (req) => {
       const saleNo = (inst.sale as { sale_number: number } | null)?.sale_number ?? "?";
 
       let bucket: string;
-      if (inst.due_date === tomorrowStr) bucket = "vespera";
+      if (inst.due_date === threeDaysStr) bucket = "tres_dias";
+      else if (inst.due_date === tomorrowStr) bucket = "vespera";
       else if (inst.due_date === todayStr) bucket = "hoje";
       else bucket = "atrasada";
 
@@ -249,7 +260,9 @@ Deno.serve(async (req) => {
               templates
             );
             const logTitle =
-              bucket === "vespera"
+              bucket === "tres_dias"
+                ? "Lembrete: vence em 3 dias"
+                : bucket === "vespera"
                 ? "Lembrete: vence amanhã"
                 : bucket === "hoje"
                 ? "Lembrete: vence hoje"
@@ -304,7 +317,10 @@ Deno.serve(async (req) => {
       // ---- Push + sininho para os ADMINS ----
       let title: string;
       let body: string;
-      if (bucket === "vespera") {
+      if (bucket === "tres_dias") {
+        title = `📅 Vence em 3 dias — ${cust.full_name}`;
+        body = `${brl(remaining)} · parcela ${inst.installment_number} (venda #${saleNo}). Saldo do cliente: ${brl(Number(cust.current_debt))}.`;
+      } else if (bucket === "vespera") {
         title = `💰 Vence amanhã — ${cust.full_name}`;
         body = `${brl(remaining)} · parcela ${inst.installment_number} (venda #${saleNo}). Saldo do cliente: ${brl(Number(cust.current_debt))}.`;
       } else if (bucket === "hoje") {

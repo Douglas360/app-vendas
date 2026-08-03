@@ -251,8 +251,9 @@ export default function ConfiguracoesPage() {
     toast.info("Modelos restaurados para o padrão. Clique em Salvar para aplicar.");
   }
 
-  function previewCollection(kind: "vespera" | "hoje" | "atraso"): string {
-    const offset = kind === "atraso" ? -3 : kind === "hoje" ? 0 : 1;
+  function previewCollection(kind: "3dias" | "vespera" | "hoje" | "atraso"): string {
+    const offset =
+      kind === "atraso" ? -3 : kind === "hoje" ? 0 : kind === "3dias" ? 3 : 1;
     const d = new Date();
     d.setDate(d.getDate() + offset);
     const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
@@ -264,6 +265,8 @@ export default function ConfiguracoesPage() {
         ? templates.lembrete_atraso
         : kind === "hoje"
         ? templates.lembrete_hoje
+        : kind === "3dias"
+        ? templates.lembrete_3dias
         : templates.lembrete_vespera,
       {
         primeiro_nome: "Maria",
@@ -958,6 +961,11 @@ export default function ConfiguracoesPage() {
 
             {(
               [
+                {
+                  key: "lembrete_3dias" as const,
+                  label: "Lembrete — vence em 3 dias",
+                  preview: previewCollection("3dias"),
+                },
                 {
                   key: "lembrete_vespera" as const,
                   label: "Lembrete — vence amanhã",

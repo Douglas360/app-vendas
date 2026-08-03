@@ -374,6 +374,7 @@ export interface PaymentMessageInput {
 // Modelos de mensagem editáveis (salvos no navegador + no banco)
 // ============================================================
 export interface MessageTemplates {
+  lembrete_3dias: string;
   lembrete_vespera: string;
   lembrete_hoje: string;
   lembrete_atraso: string;
@@ -382,6 +383,11 @@ export interface MessageTemplates {
 }
 
 export const DEFAULT_TEMPLATES: MessageTemplates = {
+  lembrete_3dias:
+    "Olá, {primeiro_nome}.\n\n" +
+    "Lembrete: a parcela de *{valor}* referente à sua compra vence em *{vencimento}* (daqui a 3 dias).\n\n" +
+    "Você pode efetuar o pagamento via PIX na chave *{pix}*. Após o pagamento, envie o comprovante por aqui.\n\n" +
+    "Caso o pagamento já tenha sido efetuado, desconsidere esta mensagem.\n\n{loja}",
   lembrete_vespera:
     "Olá, {primeiro_nome}.\n\n" +
     "Lembrete: a parcela de *{valor}* referente à sua compra vence *amanhã ({vencimento})*.\n\n" +
@@ -479,7 +485,9 @@ export function buildCollectionMessage(input: {
       ? t.lembrete_atraso
       : diffDays === 0
       ? t.lembrete_hoje
-      : t.lembrete_vespera;
+      : diffDays === 1
+      ? t.lembrete_vespera
+      : t.lembrete_3dias;
 
   return applyTemplate(tpl, {
     primeiro_nome: firstName,
