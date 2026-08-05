@@ -11,7 +11,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Bell, CheckCheck, CreditCard, MessageCircle } from "lucide-react";
 import { toast } from "sonner";
 import { buildCollectionMessage, buildWhatsappLink } from "@/lib/whatsapp";
@@ -209,8 +208,11 @@ export function NotificationBell() {
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-80 p-0">
-        <div className="flex items-center justify-between border-b p-3">
+      <PopoverContent
+        align="end"
+        className="flex max-h-[80vh] w-[calc(100vw-2rem)] flex-col p-0 sm:w-96"
+      >
+        <div className="flex shrink-0 items-center justify-between border-b p-3">
           <h4 className="text-sm font-bold">Notificações</h4>
           {unread > 0 && (
             <Button
@@ -233,7 +235,7 @@ export function NotificationBell() {
             </p>
           </div>
         ) : (
-          <ScrollArea className="max-h-96">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             <div className="divide-y">
               {items.map((n) => (
                 <div
@@ -255,13 +257,13 @@ export function NotificationBell() {
                     <CreditCard className="h-4 w-4" />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="truncate text-sm font-semibold">{n.title}</p>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm font-semibold leading-snug">{n.title}</p>
                       {!n.is_read && (
-                        <span className="h-2 w-2 shrink-0 rounded-full bg-indigo-500" />
+                        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-indigo-500" />
                       )}
                     </div>
-                    <p className="text-xs text-muted-foreground">{n.body}</p>
+                    <p className="text-xs leading-snug text-muted-foreground">{n.body}</p>
                     <p className="mt-0.5 text-[10px] text-muted-foreground/70">
                       {timeAgo(n.created_at)}
                     </p>
@@ -291,7 +293,7 @@ export function NotificationBell() {
                 </div>
               ))}
             </div>
-          </ScrollArea>
+          </div>
         )}
       </PopoverContent>
     </Popover>

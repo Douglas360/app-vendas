@@ -818,6 +818,56 @@ export default function ClienteDetalhePage() {
             .select("current_debt")
             .eq("id", customer.id)
             .single();
+
+          // Quadro de parcelas da MESMA venda, para marcar as já quitadas
+          const saleId = (inst as { sale_id?: string }).sale_id;
+          let instBlock:
+            | {
+                number: number;
+                amount: number;
+                dueDate: string;
+                paid: boolean;
+                paidDate?: string | null;
+                partialPaid?: number;
+              }[]
+            | undefined;
+          if (saleId) {
+            const { data: allInst } = await supabase
+              .from("credit_installments")
+              .select("installment_number, amount, amount_paid, due_date, paid_date, status")
+              .eq("sale_id", saleId)
+              .neq("status", "cancelado")
+              .order("installment_number", { ascending: true });
+            instBlock = (allInst || []).map(
+              (i: {
+                installment_number: number;
+                amount: number;
+                amount_paid: number;
+                due_date: string;
+                paid_date: string | null;
+                status: string;
+              }) => {
+                const isThis = i.installment_number === inst.installment_number;
+                const pago = isThis
+                  ? Number(inst.amount_paid) + amount
+                  : Number(i.amount_paid);
+                const quitada = pago >= Number(i.amount) - 0.001;
+                return {
+                  number: i.installment_number,
+                  amount: Number(i.amount),
+                  dueDate: i.due_date,
+                  paid: quitada,
+                  paidDate: quitada
+                    ? isThis
+                      ? new Date().toISOString().slice(0, 10)
+                      : i.paid_date
+                    : null,
+                  partialPaid: !quitada && pago > 0 ? pago : undefined,
+                };
+              }
+            );
+          }
+
           const msg = buildPaymentMessage({
             customerName: customer.full_name,
             amountPaid: amount,
@@ -826,6 +876,7 @@ export default function ClienteDetalhePage() {
             remainingInInstallment: Math.max(0, remainingNow),
             installmentPaid: remainingNow <= 0.001,
             totalDebt: Number(custData?.current_debt ?? 0),
+            installments: instBlock,
           });
           setWaPrompt({
             phone: customer.phone,

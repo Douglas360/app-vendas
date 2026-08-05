@@ -368,6 +368,36 @@ export interface PaymentMessageInput {
   remainingInInstallment: number;
   installmentPaid: boolean;
   totalDebt: number;
+  /** Quadro de parcelas da venda, para mostrar o que já foi quitado */
+  installments?: {
+    number: number;
+    amount: number;
+    dueDate: string; // YYYY-MM-DD
+    paid: boolean;
+    paidDate?: string | null; // YYYY-MM-DD
+    partialPaid?: number; // valor pago quando parcial
+  }[];
+}
+
+// Monta o bloco "Parcelas (crediário)" marcando as já quitadas
+function buildInstallmentsBlock(
+  list: NonNullable<PaymentMessageInput["installments"]>
+): string {
+  const lines: string[] = ["*Parcelas (crediário):*"];
+  list.forEach((i) => {
+    const due = new Date(i.dueDate + "T00:00:00").toLocaleDateString("pt-BR");
+    let line = `   ${i.number}ª · venc. ${due} · ${brl(i.amount)}`;
+    if (i.paid) {
+      const paidTxt = i.paidDate
+        ? ` ✅ pago em ${new Date(i.paidDate + "T00:00:00").toLocaleDateString("pt-BR")}`
+        : " ✅ pago";
+      line += paidTxt;
+    } else if (i.partialPaid && i.partialPaid > 0) {
+      line += ` ⏳ pago ${brl(i.partialPaid)} · falta ${brl(i.amount - i.partialPaid)}`;
+    }
+    lines.push(line);
+  });
+  return lines.join("\n");
 }
 
 // ============================================================
@@ -407,7 +437,7 @@ export const DEFAULT_TEMPLATES: MessageTemplates = {
     "*{loja}*\n✅ *Pagamento recebido!*\n\n" +
     "Olá {primeiro_nome}, confirmamos o recebimento de *{valor_pago}*.\n" +
     "Parcela {parcela}ª · venda #{venda}\n" +
-    "{status_parcela}\n\n{saldo_linha}",
+    "{status_parcela}\n\n{parcelas}{saldo_linha}",
   comprovante_venda:
     "*{loja}*\n{contato}──────────────\n" +
     "🧾 *Comprovante de Venda* #{numero}\n📅 {data}\n{cliente_linha}──────────────\n" +
@@ -452,6 +482,11 @@ export function buildPaymentMessage(input: PaymentMessageInput): string {
     input.totalDebt > 0
       ? `Saldo total em aberto: *${brl(input.totalDebt)}*`
       : "Você está com tudo em dia. Obrigado! 🙏";
+  const parcelasBloco =
+    input.installments && input.installments.length > 0
+      ? buildInstallmentsBlock(input.installments) + "\n\n"
+      : "";
+
   return applyTemplate(t.confirmacao_pagamento, {
     loja: store.name || "",
     primeiro_nome: firstName,
@@ -460,6 +495,7 @@ export function buildPaymentMessage(input: PaymentMessageInput): string {
     parcela: String(input.installmentNumber),
     venda: String(input.saleNumber),
     status_parcela: statusParcela,
+    parcelas: parcelasBloco,
     saldo_linha: saldoLinha,
   });
 }

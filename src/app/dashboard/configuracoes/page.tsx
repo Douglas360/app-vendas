@@ -287,8 +287,13 @@ export default function ConfiguracoesPage() {
       valor_pago: "R$ 50,00",
       parcela: "1",
       venda: "34",
-      status_parcela: "Resta nesta parcela: R$ 49,90",
-      saldo_linha: "Saldo total em aberto: *R$ 49,90*",
+      status_parcela: "Parcela quitada! ✔️",
+      parcelas:
+        "*Parcelas (crediário):*\n" +
+        "   1ª · venc. 10/08/2026 · R$ 119,96 ✅ pago em 03/08/2026\n" +
+        "   2ª · venc. 10/09/2026 · R$ 119,96\n" +
+        "   3ª · venc. 10/10/2026 · R$ 119,96\n\n",
+      saldo_linha: "Saldo total em aberto: *R$ 239,92*",
     });
   }
 
