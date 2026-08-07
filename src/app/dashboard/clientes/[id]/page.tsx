@@ -789,21 +789,40 @@ export default function ClienteDetalhePage() {
       toast.error("Informe um valor de pagamento válido.");
       return;
     }
-    if (amount > remaining + 0.001) {
-      toast.error(`O valor excede o saldo restante de ${currency(remaining)}.`);
+    if (amount > totalOpenDebt + 0.001) {
+      toast.error("Valor maior que o total devido", {
+        description: `O total em aberto deste cliente é ${currency(totalOpenDebt)}.`,
+      });
       return;
     }
 
     setIsSubmittingPayment(true);
     const inst = selectedInstallment;
+    // Se o valor passa desta parcela, distribui o excedente nas demais
+    const excede = amount > remaining + 0.001;
     try {
-      const { data: updatedRaw, error } = await supabase.rpc("pay_installment", {
-        p_installment_id: inst.id,
-        p_amount: amount,
-      });
-      if (error) throw error;
+      let updatedRaw: unknown = null;
+      if (excede) {
+        const { error } = await supabase.rpc("pay_customer_amount", {
+          p_customer_id: customer!.id,
+          p_amount: amount,
+          p_method: "dinheiro",
+        });
+        if (error) throw error;
+      } else {
+        const { data, error } = await supabase.rpc("pay_installment", {
+          p_installment_id: inst.id,
+          p_amount: amount,
+        });
+        if (error) throw error;
+        updatedRaw = data;
+      }
 
-      toast.success("Pagamento registrado com sucesso!");
+      toast.success("Pagamento registrado com sucesso!", {
+        description: excede
+          ? "O valor excedente foi abatido nas próximas parcelas."
+          : undefined,
+      });
       setIsPaymentOpen(false);
 
       // Monta a confirmação e abre o WhatsApp do cliente com a mensagem pronta
@@ -2059,8 +2078,8 @@ export default function ClienteDetalhePage() {
           <DialogHeader>
             <DialogTitle>Registrar Recebimento</DialogTitle>
             <DialogDescription>
-              Lance um recebimento (parcial ou total) para amortizar esta
-              parcela.
+              Lance um recebimento (parcial ou total). Se o valor for maior que esta
+              parcela, o excedente é abatido nas próximas.
             </DialogDescription>
           </DialogHeader>
 
@@ -2088,6 +2107,10 @@ export default function ClienteDetalhePage() {
                     )}
                   </span>
                 </div>
+                <div className="flex justify-between border-t pt-1.5 text-xs text-muted-foreground">
+                  <span>Total devido do cliente:</span>
+                  <span className="font-semibold">{currency(totalOpenDebt)}</span>
+                </div>
               </div>
 
               <div className="space-y-1.5">
@@ -2097,14 +2120,17 @@ export default function ClienteDetalhePage() {
                   type="number"
                   step="0.01"
                   min="0.01"
-                  max={(
-                    selectedInstallment.amount -
-                    selectedInstallment.amount_paid
-                  ).toFixed(2)}
+                  max={totalOpenDebt.toFixed(2)}
                   value={paymentAmount}
                   onChange={(e) => setPaymentAmount(e.target.value)}
                   required
                 />
+                {parseFloat(paymentAmount) >
+                  selectedInstallment.amount - selectedInstallment.amount_paid + 0.001 && (
+                  <p className="text-[11px] text-amber-600">
+                    O valor excede esta parcela — o restante será abatido nas próximas.
+                  </p>
+                )}
               </div>
 
               <DialogFooter className="pt-2 gap-2">
