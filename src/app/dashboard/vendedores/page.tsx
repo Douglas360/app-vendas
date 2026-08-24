@@ -32,6 +32,8 @@ import {
   Percent,
   Trash2,
   Edit,
+  Check,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -97,6 +99,11 @@ export default function VendedoresPage() {
   const [tMax, setTMax] = useState("");
   const [tPct, setTPct] = useState("");
   const [isSavingTier, setIsSavingTier] = useState(false);
+  // Edição de faixa
+  const [editTierId, setEditTierId] = useState<string | null>(null);
+  const [eMin, setEMin] = useState("");
+  const [eMax, setEMax] = useState("");
+  const [ePct, setEPct] = useState("");
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -223,6 +230,44 @@ export default function VendedoresPage() {
       return;
     }
     load();
+  }
+
+  // Edição de faixa existente
+  function startEditTier(t: Tier) {
+    setEditTierId(t.id);
+    setEMin(String(Number(t.min_amount)));
+    setEMax(t.max_amount === null ? "" : String(Number(t.max_amount)));
+    setEPct(String(Number(t.percent)));
+  }
+
+  async function handleSaveTier(id: string) {
+    const min = parseFloat(eMin) || 0;
+    const max = eMax.trim() === "" ? null : parseFloat(eMax);
+    const pct = parseFloat(ePct);
+    if (isNaN(pct) || pct <= 0) {
+      toast.error("Informe o percentual.");
+      return;
+    }
+    if (max !== null && max <= min) {
+      toast.error("O valor final deve ser maior que o inicial.");
+      return;
+    }
+    setIsSavingTier(true);
+    try {
+      const { error } = await supabase
+        .from("commission_tiers")
+        .update({ min_amount: min, max_amount: max, percent: pct })
+        .eq("id", id);
+      if (error) throw error;
+      toast.success("Faixa atualizada!");
+      setEditTierId(null);
+      load();
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Tente novamente.";
+      toast.error("Erro ao salvar faixa", { description: msg });
+    } finally {
+      setIsSavingTier(false);
+    }
   }
 
   const shownTiers = tiers.filter((t) =>
@@ -540,30 +585,100 @@ export default function VendedoresPage() {
                   Nenhuma faixa cadastrada.
                 </p>
               ) : (
-                shownTiers.map((t) => (
-                  <div
-                    key={t.id}
-                    className="flex items-center justify-between rounded-lg border p-2.5"
-                  >
-                    <span className="text-sm">
-                      {brl(Number(t.min_amount))} —{" "}
-                      {t.max_amount === null ? "sem teto" : brl(Number(t.max_amount))}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <Badge className="bg-indigo-600 text-white">
-                        {Number(t.percent)}%
-                      </Badge>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => handleDeleteTier(t.id)}
-                        className="h-7 w-7 text-rose-500 hover:bg-rose-500/10"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                shownTiers.map((t) =>
+                  editTierId === t.id ? (
+                    <div
+                      key={t.id}
+                      className="grid grid-cols-4 items-end gap-2 rounded-lg border-2 border-indigo-500/40 bg-indigo-500/5 p-2.5"
+                    >
+                      <div className="space-y-1">
+                        <Label className="text-[10px]">De (R$)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={eMin}
+                          onChange={(e) => setEMin(e.target.value)}
+                          className="h-9"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[10px]">Até (R$)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          placeholder="sem teto"
+                          value={eMax}
+                          onChange={(e) => setEMax(e.target.value)}
+                          className="h-9"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[10px]">%</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={ePct}
+                          onChange={(e) => setEPct(e.target.value)}
+                          className="h-9"
+                        />
+                      </div>
+                      <div className="flex gap-1">
+                        <Button
+                          size="icon"
+                          onClick={() => handleSaveTier(t.id)}
+                          disabled={isSavingTier}
+                          className="h-9 w-9 bg-emerald-600 text-white hover:bg-emerald-700"
+                        >
+                          {isSavingTier ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Check className="h-4 w-4" />
+                          )}
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="outline"
+                          onClick={() => setEditTierId(null)}
+                          className="h-9 w-9"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  ) : (
+                    <div
+                      key={t.id}
+                      className="flex items-center justify-between rounded-lg border p-2.5"
+                    >
+                      <span className="text-sm">
+                        {brl(Number(t.min_amount))} —{" "}
+                        {t.max_amount === null ? "sem teto" : brl(Number(t.max_amount))}
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <Badge className="bg-indigo-600 text-white">
+                          {Number(t.percent)}%
+                        </Badge>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => startEditTier(t)}
+                          title="Editar faixa"
+                          className="h-7 w-7 text-blue-500 hover:bg-blue-500/10"
+                        >
+                          <Edit className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => handleDeleteTier(t.id)}
+                          className="h-7 w-7 text-rose-500 hover:bg-rose-500/10"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  )
+                )
               )}
             </div>
           </div>

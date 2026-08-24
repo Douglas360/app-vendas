@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/components/providers/auth-provider";
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,8 @@ import {
   Search,
   CheckCircle2,
   Handshake,
+  Edit,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -79,8 +82,10 @@ function brl(v: number) {
 
 export default function ConsignadoPage() {
   const supabase = createClient();
+  const router = useRouter();
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin";
+  const [editingKit, setEditingKit] = useState<Kit | null>(null);
 
   const [kits, setKits] = useState<Kit[]>([]);
   const [sellers, setSellers] = useState<Seller[]>([]);
@@ -98,11 +103,6 @@ export default function ConsignadoPage() {
   >([]);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Acerto
-  const [settleKit, setSettleKit] = useState<Kit | null>(null);
-  const [soldMap, setSoldMap] = useState<Record<string, string>>({});
-  const [settleMethod, setSettleMethod] = useState("dinheiro");
-  const [isSettling, setIsSettling] = useState(false);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -176,6 +176,37 @@ export default function ConsignadoPage() {
 
   const cartTotal = cart.reduce((s, c) => s + c.quantity * c.unit_price, 0);
 
+  // Abre o diálogo em modo edição, carregando os itens do kit
+  function openEditKit(k: Kit) {
+    setEditingKit(k);
+    setNewSeller(k.seller_id);
+    setNewNotes(k.notes || "");
+    setCart(
+      k.items.map((i) => {
+        const prod = products.find((p) => p.id === i.product_id);
+        // Estoque disponível = estoque atual + o que já está neste kit
+        const stock = (prod ? Number(prod.stock_quantity) : 0) + Number(i.quantity);
+        return {
+          product_id: i.product_id,
+          name: i.product?.name || "Produto",
+          quantity: Number(i.quantity),
+          unit_price: Number(i.unit_price),
+          cost_price: prod ? Number(prod.cost_price) : 0,
+          stock,
+        };
+      })
+    );
+    setIsNewOpen(true);
+  }
+
+  function openNewKit() {
+    setEditingKit(null);
+    setCart([]);
+    setNewSeller("");
+    setNewNotes("");
+    setIsNewOpen(true);
+  }
+
   async function handleCreateKit(e: React.FormEvent) {
     e.preventDefault();
     if (!newSeller) {
@@ -188,81 +219,57 @@ export default function ConsignadoPage() {
     }
     setIsSaving(true);
     try {
-      const { error } = await supabase.rpc("create_consignment_kit", {
-        p_seller_id: newSeller,
-        p_items: cart.map((c) => ({
-          product_id: c.product_id,
-          quantity: c.quantity,
-          unit_price: c.unit_price,
-          cost_price: c.cost_price,
-        })),
-        p_notes: newNotes || null,
-      });
+      const items = cart.map((c) => ({
+        product_id: c.product_id,
+        quantity: c.quantity,
+        unit_price: c.unit_price,
+        cost_price: c.cost_price,
+      }));
+      const { error } = editingKit
+        ? await supabase.rpc("edit_consignment_kit", {
+            p_kit_id: editingKit.id,
+            p_items: items,
+            p_notes: newNotes || null,
+          })
+        : await supabase.rpc("create_consignment_kit", {
+            p_seller_id: newSeller,
+            p_items: items,
+            p_notes: newNotes || null,
+          });
       if (error) throw error;
-      toast.success("Kit criado!", {
-        description: "Os produtos saíram do estoque da loja.",
+      toast.success(editingKit ? "Kit atualizado!" : "Kit criado!", {
+        description: "O estoque da loja foi ajustado.",
       });
       setIsNewOpen(false);
+      setEditingKit(null);
       setCart([]);
       setNewSeller("");
       setNewNotes("");
       load();
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "Tente novamente.";
-      toast.error("Erro ao criar o kit", { description: msg });
+      toast.error("Erro ao salvar o kit", { description: msg });
     } finally {
       setIsSaving(false);
     }
   }
 
-  function openSettle(k: Kit) {
-    setSettleKit(k);
-    const map: Record<string, string> = {};
-    k.items.forEach((i) => (map[i.id] = "0"));
-    setSoldMap(map);
-    setSettleMethod("dinheiro");
-  }
-
-  const settleTotal = settleKit
-    ? settleKit.items.reduce(
-        (s, i) => s + (parseFloat(soldMap[i.id] || "0") || 0) * Number(i.unit_price),
-        0
+  async function handleCancelKit(k: Kit) {
+    if (
+      !confirm(
+        `Cancelar o Kit #${k.kit_number}? Todos os produtos voltam para o estoque.`
       )
-    : 0;
-
-  async function handleSettle() {
-    if (!settleKit) return;
-    setIsSettling(true);
-    try {
-      const { data, error } = await supabase.rpc("settle_consignment_kit", {
-        p_kit_id: settleKit.id,
-        p_sold: settleKit.items.map((i) => ({
-          item_id: i.id,
-          quantity_sold: parseFloat(soldMap[i.id] || "0") || 0,
-        })),
-        p_method: settleMethod,
-      });
-      if (error) throw error;
-      const r = data as {
-        total_sold: number;
-        commission_percent: number;
-        commission_amount: number;
-        net_amount: number;
-      };
-      toast.success("Acerto concluído!", {
-        description: `Vendido ${brl(Number(r.total_sold))} · Comissão ${Number(
-          r.commission_percent
-        )}% (${brl(Number(r.commission_amount))}) · Líquido ${brl(Number(r.net_amount))}`,
-      });
-      setSettleKit(null);
-      load();
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : "Tente novamente.";
-      toast.error("Erro no acerto", { description: msg });
-    } finally {
-      setIsSettling(false);
+    )
+      return;
+    const { error } = await supabase.rpc("cancel_consignment_kit", { p_kit_id: k.id });
+    if (error) {
+      toast.error("Erro ao cancelar", { description: error.message });
+      return;
     }
+    toast.success("Kit cancelado. Produtos devolvidos ao estoque.");
+    load();
   }
+
 
   if (!isAdmin) {
     return (
@@ -294,7 +301,7 @@ export default function ConsignadoPage() {
           </Button>
           <Button
             size="sm"
-            onClick={() => setIsNewOpen(true)}
+            onClick={openNewKit}
             className="bg-indigo-600 text-white hover:bg-indigo-700"
           >
             <Plus className="mr-2 h-4 w-4" />
@@ -375,14 +382,35 @@ export default function ConsignadoPage() {
                       )}
                     </div>
                     {k.status === "aberto" && (
-                      <Button
-                        size="sm"
-                        onClick={() => openSettle(k)}
-                        className="shrink-0 bg-emerald-600 text-white hover:bg-emerald-700"
-                      >
-                        <Handshake className="mr-1.5 h-4 w-4" />
-                        Fazer acerto
-                      </Button>
+                      <div className="flex shrink-0 flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openEditKit(k)}
+                        >
+                          <Edit className="mr-1.5 h-4 w-4" />
+                          Editar
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleCancelKit(k)}
+                          className="text-rose-600 hover:bg-rose-500/10"
+                        >
+                          <XCircle className="mr-1.5 h-4 w-4" />
+                          Cancelar
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() =>
+                            router.push(`/dashboard/consignado/${k.id}/acerto`)
+                          }
+                          className="bg-emerald-600 text-white hover:bg-emerald-700"
+                        >
+                          <Handshake className="mr-1.5 h-4 w-4" />
+                          Fazer acerto
+                        </Button>
+                      </div>
                     )}
                   </div>
 
@@ -420,16 +448,24 @@ export default function ConsignadoPage() {
       <Dialog open={isNewOpen} onOpenChange={setIsNewOpen}>
         <DialogContent className="flex max-h-[90vh] max-w-lg flex-col">
           <DialogHeader className="shrink-0">
-            <DialogTitle>Novo Kit de Consignado</DialogTitle>
+            <DialogTitle>
+              {editingKit ? `Editar Kit #${editingKit.kit_number}` : "Novo Kit de Consignado"}
+            </DialogTitle>
             <DialogDescription>
-              Os produtos saem do estoque da loja e ficam em poder do vendedor.
+              {editingKit
+                ? "Ajuste os produtos do kit. O estoque da loja é corrigido automaticamente."
+                : "Os produtos saem do estoque da loja e ficam em poder do vendedor."}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCreateKit} className="flex min-h-0 flex-1 flex-col">
             <div className="flex-1 space-y-4 overflow-y-auto py-1 pr-1">
               <div className="space-y-1.5">
                 <Label>Vendedor *</Label>
-                <Select value={newSeller} onValueChange={setNewSeller}>
+                <Select
+                  value={newSeller}
+                  onValueChange={setNewSeller}
+                  disabled={!!editingKit}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Selecione o vendedor" />
                   </SelectTrigger>
@@ -548,99 +584,13 @@ export default function ConsignadoPage() {
                 className="bg-indigo-600 text-white hover:bg-indigo-700"
               >
                 {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Criar Kit
+                {editingKit ? "Salvar Alterações" : "Criar Kit"}
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
-      {/* Acerto */}
-      <Dialog open={!!settleKit} onOpenChange={(o) => !o && setSettleKit(null)}>
-        <DialogContent className="flex max-h-[90vh] max-w-lg flex-col">
-          <DialogHeader className="shrink-0">
-            <DialogTitle>Acerto do Kit #{settleKit?.kit_number}</DialogTitle>
-            <DialogDescription>
-              Informe quanto foi vendido de cada produto. O que sobrar volta ao estoque.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-            {settleKit?.items.map((i) => (
-              <div key={i.id} className="flex items-center gap-2 rounded-lg border p-2.5">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{i.product?.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    Levou {Number(i.quantity)} · {brl(Number(i.unit_price))} cada
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  <Input
-                    type="number"
-                    min="0"
-                    max={Number(i.quantity)}
-                    value={soldMap[i.id] ?? "0"}
-                    onChange={(e) =>
-                      setSoldMap((prev) => ({ ...prev, [i.id]: e.target.value }))
-                    }
-                    className="h-9 w-16 text-center"
-                  />
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      setSoldMap((prev) => ({ ...prev, [i.id]: String(Number(i.quantity)) }))
-                    }
-                    className="h-9 px-2 text-[11px]"
-                  >
-                    Tudo
-                  </Button>
-                </div>
-              </div>
-            ))}
-
-            <div className="space-y-1.5">
-              <Label>Forma de pagamento (recebido do vendedor)</Label>
-              <Select value={settleMethod} onValueChange={setSettleMethod}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="dinheiro">Dinheiro</SelectItem>
-                  <SelectItem value="pix">PIX</SelectItem>
-                  <SelectItem value="cartao_debito">Cartão Débito</SelectItem>
-                  <SelectItem value="cartao_credito">Cartão Crédito</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="rounded-lg bg-indigo-500/5 p-3 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Total vendido</span>
-                <span className="font-bold text-indigo-600">{brl(settleTotal)}</span>
-              </div>
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                A comissão é calculada automaticamente pela faixa do vendedor ao confirmar.
-              </p>
-            </div>
-          </div>
-
-          <DialogFooter className="mt-3 shrink-0 border-t pt-3">
-            <Button variant="outline" onClick={() => setSettleKit(null)}>
-              Cancelar
-            </Button>
-            <Button
-              onClick={handleSettle}
-              disabled={isSettling}
-              className="bg-emerald-600 text-white hover:bg-emerald-700"
-            >
-              {isSettling && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Confirmar acerto
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
