@@ -30,6 +30,9 @@ import {
   Wallet,
   Bell,
   CalendarClock,
+  UserRound,
+  PackageOpen,
+  Boxes,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useState } from "react";
@@ -79,6 +82,24 @@ const NAV_ITEMS = [
     title: "Notificações",
     href: "/dashboard/notificacoes",
     icon: Bell,
+  },
+  {
+    title: "Vendedores",
+    href: "/dashboard/vendedores",
+    icon: UserRound,
+    adminOnly: true,
+  },
+  {
+    title: "Consignado",
+    href: "/dashboard/consignado",
+    icon: PackageOpen,
+    adminOnly: true,
+  },
+  {
+    title: "Meu Kit",
+    href: "/dashboard/meu-kit",
+    icon: Boxes,
+    sellerOnly: true,
   },
 ];
 
@@ -185,7 +206,12 @@ function SidebarContent({
       {/* Navigation */}
       <ScrollArea className="flex-1 px-3 py-4">
         <nav className="flex flex-col gap-1">
-          {NAV_ITEMS.map((item) => (
+          {NAV_ITEMS.filter((item) => {
+            const isAdmin = profile?.role === "admin";
+            if (item.adminOnly) return isAdmin;
+            if (item.sellerOnly) return !isAdmin;
+            return true;
+          }).map((item) => (
             <NavItem
               key={item.href}
               item={item}
