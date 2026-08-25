@@ -255,6 +255,8 @@ export interface KitDocData {
   deliveredAt: string; // ISO
   items: KitDocItem[];
   notes?: string | null;
+  /** Faixas de comissão vigentes do vendedor */
+  tiers?: CommissionTier[];
 }
 
 export function buildKitHtml(d: KitDocData): string {
@@ -273,6 +275,32 @@ export function buildKitHtml(d: KitDocData): string {
 
   const totalPecas = d.items.reduce((s, i) => s + i.quantity, 0);
   const totalValor = d.items.reduce((s, i) => s + i.quantity * i.unitPrice, 0);
+
+  // Tabela de comissão (referência para o vendedor)
+  const tiers = (d.tiers || []).slice().sort((a, b) => a.minAmount - b.minAmount);
+  const tiersBlock = tiers.length
+    ? `<div class="tiers">
+        <div class="tiers-title">Tabela de comissão do vendedor</div>
+        <table class="tiers-table">
+          <thead><tr><th>Faixa de venda</th><th class="r">Comissão</th></tr></thead>
+          <tbody>
+            ${tiers
+              .map(
+                (t) => `<tr>
+                  <td>${brl(t.minAmount)} ${
+                    t.maxAmount === null ? "ou mais" : `a ${brl(t.maxAmount)}`
+                  }</td>
+                  <td class="r b">${t.percent}%</td>
+                </tr>`
+              )
+              .join("")}
+          </tbody>
+        </table>
+        <div class="tiers-note">
+          A comissão é calculada sobre o total efetivamente vendido, apurado no acerto.
+        </div>
+      </div>`
+    : "";
 
   return `<!DOCTYPE html>
 <html lang="pt-BR"><head><meta charset="utf-8" />
@@ -298,6 +326,13 @@ export function buildKitHtml(d: KitDocData): string {
   .totals { margin-top: 16px; margin-left: auto; width: 280px; font-size: 13px; }
   .totals div { display: flex; justify-content: space-between; padding: 5px 0; }
   .totals .final { border-top: 2px solid #111; font-size: 16px; font-weight: 800; padding-top: 8px; }
+  .tiers { margin-top: 18px; width: 320px; }
+  .tiers-title { font-size: 11px; font-weight: 700; text-transform: uppercase;
+                 letter-spacing: .3px; color: #555; margin-bottom: 4px; }
+  .tiers-table { font-size: 11px; border: 1px solid #ddd; border-radius: 6px; }
+  .tiers-table th { padding: 5px 8px; font-size: 10px; }
+  .tiers-table td { padding: 5px 8px; }
+  .tiers-note { font-size: 9px; color: #888; margin-top: 4px; }
   .terms { margin-top: 18px; font-size: 10px; color: #555; line-height: 1.5; }
   .sign { margin-top: 44px; display: flex; gap: 40px; font-size: 12px; text-align: center; }
   .sign div { flex: 1; border-top: 1px solid #111; padding-top: 6px; }
@@ -337,6 +372,8 @@ export function buildKitHtml(d: KitDocData): string {
     <div><span>Total de peças</span><span class="b">${totalPecas}</span></div>
     <div class="final"><span>Valor total do kit</span><span>${brl(totalValor)}</span></div>
   </div>
+
+  ${tiersBlock}
 
   ${d.notes ? `<div class="box small" style="margin-top:16px"><strong>Observações:</strong> ${esc(d.notes)}</div>` : ""}
 

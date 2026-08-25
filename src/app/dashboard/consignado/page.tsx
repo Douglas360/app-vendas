@@ -78,7 +78,7 @@ function brl(v: number) {
 }
 
 // Converte o kit no formato do romaneio (PDF de entrega)
-function kitDocFrom(k: Kit): KitDocData {
+function kitDocFrom(k: Kit, tiers?: KitDocData["tiers"]): KitDocData {
   return {
     kitNumber: k.kit_number,
     sellerName: k.seller?.full_name || "Vendedor",
@@ -91,6 +91,7 @@ function kitDocFrom(k: Kit): KitDocData {
       unitPrice: Number(i.unit_price),
     })),
     notes: k.notes,
+    tiers,
   };
 }
 
@@ -303,7 +304,7 @@ export default function ConsignadoPage() {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => printKit(kitDocFrom(k))}
+                          onClick={() => printKit(kitDocFrom(k, tiersFor(k.seller_id)))}
                           title="Gerar PDF do kit"
                           className="text-indigo-600"
                         >
@@ -318,7 +319,7 @@ export default function ConsignadoPage() {
                               window.open(
                                 buildWhatsappLink(
                                   k.seller!.phone!,
-                                  buildKitMessage(kitDocFrom(k))
+                                  buildKitMessage(kitDocFrom(k, tiersFor(k.seller_id)))
                                 ),
                                 "_blank"
                               )
@@ -366,7 +367,7 @@ export default function ConsignadoPage() {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => printKit(kitDocFrom(k))}
+                          onClick={() => printKit(kitDocFrom(k, tiersFor(k.seller_id)))}
                           title="PDF do kit entregue"
                           className="text-indigo-600"
                         >
