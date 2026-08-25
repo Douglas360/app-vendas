@@ -147,8 +147,12 @@ export function buildSettlementHtml(d: SettlementData): string {
 
 // Abre a janela de impressão (permite salvar como PDF)
 export function printSettlement(d: SettlementData) {
+  printHtml(buildSettlementHtml(d));
+}
+
+// Imprime um HTML usando iframe oculto (evita bloqueio de popup)
+function printHtml(html: string) {
   if (typeof window === "undefined") return;
-  const html = buildSettlementHtml(d);
 
   const iframe = document.createElement("iframe");
   iframe.style.position = "fixed";
@@ -180,6 +184,156 @@ export function printSettlement(d: SettlementData) {
   };
   if (iframe.contentWindow) iframe.contentWindow.onload = triggerPrint;
   setTimeout(triggerPrint, 400);
+}
+
+// ============================================================
+// Romaneio do KIT (lista de entrega ao vendedor)
+// ============================================================
+export interface KitDocItem {
+  name: string;
+  code: string;
+  quantity: number;
+  unitPrice: number;
+}
+
+export interface KitDocData {
+  kitNumber: number | string;
+  sellerName: string;
+  sellerPhone?: string | null;
+  deliveredAt: string; // ISO
+  items: KitDocItem[];
+  notes?: string | null;
+}
+
+export function buildKitHtml(d: KitDocData): string {
+  const store = getStoreInfo();
+  const rows = d.items
+    .map(
+      (i) => `<tr>
+        <td>${esc(i.name)}</td>
+        <td class="mono">${esc(i.code)}</td>
+        <td class="c b">${i.quantity}</td>
+        <td class="r">${brl(i.unitPrice)}</td>
+        <td class="r b">${brl(i.quantity * i.unitPrice)}</td>
+      </tr>`
+    )
+    .join("");
+
+  const totalPecas = d.items.reduce((s, i) => s + i.quantity, 0);
+  const totalValor = d.items.reduce((s, i) => s + i.quantity * i.unitPrice, 0);
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="utf-8" />
+<title>Kit Consignado #${d.kitNumber}</title>
+<style>
+  @page { size: A4; margin: 14mm; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; color: #111; margin: 0; }
+  h1 { font-size: 20px; margin: 0; }
+  .muted { color: #666; }
+  .head { display: flex; justify-content: space-between; align-items: flex-start;
+          border-bottom: 2px solid #111; padding-bottom: 10px; margin-bottom: 16px; }
+  .store { font-size: 18px; font-weight: 800; text-transform: uppercase; }
+  .small { font-size: 11px; }
+  .box { border: 1px solid #ddd; border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
+  .grid { display: flex; gap: 24px; flex-wrap: wrap; font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; background: #f4f4f5; padding: 7px 8px; border-bottom: 1px solid #ddd;
+       font-size: 11px; text-transform: uppercase; letter-spacing: .3px; }
+  td { padding: 7px 8px; border-bottom: 1px solid #eee; }
+  .c { text-align: center; } .r { text-align: right; } .b { font-weight: 700; }
+  .mono { font-family: ui-monospace, "Courier New", monospace; font-size: 11px; }
+  .totals { margin-top: 16px; margin-left: auto; width: 280px; font-size: 13px; }
+  .totals div { display: flex; justify-content: space-between; padding: 5px 0; }
+  .totals .final { border-top: 2px solid #111; font-size: 16px; font-weight: 800; padding-top: 8px; }
+  .terms { margin-top: 18px; font-size: 10px; color: #555; line-height: 1.5; }
+  .sign { margin-top: 44px; display: flex; gap: 40px; font-size: 12px; text-align: center; }
+  .sign div { flex: 1; border-top: 1px solid #111; padding-top: 6px; }
+  .foot { margin-top: 24px; font-size: 10px; color: #888; text-align: center; }
+</style></head>
+<body>
+  <div class="head">
+    <div>
+      <div class="store">${esc(store.name)}</div>
+      ${store.cnpj ? `<div class="small muted">CNPJ: ${esc(store.cnpj)}</div>` : ""}
+      ${store.phone ? `<div class="small muted">Tel: ${esc(store.phone)}</div>` : ""}
+    </div>
+    <div style="text-align:right">
+      <h1>Kit Consignado</h1>
+      <div class="small muted">Kit #${d.kitNumber}</div>
+      <div class="small muted">Entrega: ${dt(d.deliveredAt)}</div>
+    </div>
+  </div>
+
+  <div class="box">
+    <div class="grid">
+      <div><strong>Vendedor:</strong> ${esc(d.sellerName)}</div>
+      ${d.sellerPhone ? `<div><strong>Telefone:</strong> ${esc(d.sellerPhone)}</div>` : ""}
+      <div><strong>Data de entrega:</strong> ${dt(d.deliveredAt)}</div>
+    </div>
+  </div>
+
+  <table>
+    <thead><tr>
+      <th>Produto</th><th>Código</th><th class="c">Qtd</th>
+      <th class="r">Preço</th><th class="r">Total</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+
+  <div class="totals">
+    <div><span>Total de peças</span><span class="b">${totalPecas}</span></div>
+    <div class="final"><span>Valor total do kit</span><span>${brl(totalValor)}</span></div>
+  </div>
+
+  ${d.notes ? `<div class="box small" style="margin-top:16px"><strong>Observações:</strong> ${esc(d.notes)}</div>` : ""}
+
+  <div class="terms">
+    Declaro ter recebido as mercadorias listadas acima em regime de consignação, comprometendo-me
+    a devolvê-las nas mesmas condições ou efetuar o pagamento das peças vendidas na data do acerto.
+  </div>
+
+  <div class="sign">
+    <div>${esc(d.sellerName)}<br /><span class="muted small">Recebi as mercadorias</span></div>
+    <div>${esc(store.name)}<br /><span class="muted small">Responsável pela entrega</span></div>
+  </div>
+
+  <div class="foot">Documento sem valor fiscal · Gerado em ${new Date().toLocaleString(
+    "pt-BR"
+  )}</div>
+</body></html>`;
+}
+
+// Imprime o romaneio do kit (permite salvar em PDF)
+export function printKit(d: KitDocData) {
+  printHtml(buildKitHtml(d));
+}
+
+// Versão em texto do kit para o WhatsApp do vendedor
+export function buildKitMessage(d: KitDocData): string {
+  const store = getStoreInfo();
+  const lines: string[] = [];
+  lines.push(`*${store.name.toUpperCase()}*`);
+  lines.push("──────────────");
+  lines.push(`📦 *Kit Consignado* #${d.kitNumber}`);
+  lines.push(`👤 ${d.sellerName}`);
+  lines.push(`📅 Entrega: ${dt(d.deliveredAt)}`);
+  lines.push("──────────────");
+  d.items.forEach((i) => {
+    lines.push(`• ${i.name}`);
+    lines.push(`   ${i.quantity} x ${brl(i.unitPrice)} = ${brl(i.quantity * i.unitPrice)}`);
+  });
+  const totalPecas = d.items.reduce((s, i) => s + i.quantity, 0);
+  const totalValor = d.items.reduce((s, i) => s + i.quantity * i.unitPrice, 0);
+  lines.push("──────────────");
+  lines.push(`Total: ${totalPecas} peça(s) · *${brl(totalValor)}*`);
+  if (d.notes) {
+    lines.push("");
+    lines.push(d.notes);
+  }
+  lines.push("──────────────");
+  lines.push("Boas vendas! 🙌");
+  return lines.join("\n");
 }
 
 // Versão em texto para o WhatsApp do vendedor

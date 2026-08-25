@@ -25,12 +25,16 @@ import {
   XCircle,
   Printer,
   MessageCircle,
+  FileText,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
   printSettlement,
   buildSettlementMessage,
+  printKit,
+  buildKitMessage,
   type SettlementData,
+  type KitDocData,
 } from "@/lib/settlement-receipt";
 import { buildWhatsappLink } from "@/lib/whatsapp";
 
@@ -40,7 +44,12 @@ interface KitItem {
   quantity: number;
   unit_price: number;
   quantity_sold: number;
-  product: { name: string; image_url: string | null } | null;
+  product: {
+    name: string;
+    image_url: string | null;
+    sku: string | null;
+    barcode: string | null;
+  } | null;
 }
 interface Kit {
   id: string;
@@ -60,6 +69,23 @@ interface Kit {
 
 function brl(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+// Converte o kit no formato do romaneio (PDF de entrega)
+function kitDocFrom(k: Kit): KitDocData {
+  return {
+    kitNumber: k.kit_number,
+    sellerName: k.seller?.full_name || "Vendedor",
+    sellerPhone: k.seller?.phone || null,
+    deliveredAt: k.delivered_at,
+    items: k.items.map((i) => ({
+      name: i.product?.name || "Produto",
+      code: i.product?.barcode || i.product?.sku || "—",
+      quantity: Number(i.quantity),
+      unitPrice: Number(i.unit_price),
+    })),
+    notes: k.notes,
+  };
 }
 
 // Converte um kit acertado no formato do recibo
@@ -99,7 +125,7 @@ export default function ConsignadoPage() {
       const { data } = await supabase
         .from("consignment_kits")
         .select(
-          "*, seller:sellers(full_name, phone), items:consignment_kit_items(id, product_id, quantity, unit_price, quantity_sold, product:products(name, image_url))"
+          "*, seller:sellers(full_name, phone), items:consignment_kit_items(id, product_id, quantity, unit_price, quantity_sold, product:products(name, image_url, sku, barcode))"
         )
         .order("delivered_at", { ascending: false });
       setKits((data as unknown as Kit[]) || []);
@@ -248,6 +274,36 @@ export default function ConsignadoPage() {
                         <Button
                           size="sm"
                           variant="outline"
+                          onClick={() => printKit(kitDocFrom(k))}
+                          title="Gerar PDF do kit"
+                          className="text-indigo-600"
+                        >
+                          <FileText className="mr-1.5 h-4 w-4" />
+                          PDF
+                        </Button>
+                        {k.seller?.phone && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              window.open(
+                                buildWhatsappLink(
+                                  k.seller!.phone!,
+                                  buildKitMessage(kitDocFrom(k))
+                                ),
+                                "_blank"
+                              )
+                            }
+                            title="Enviar lista no WhatsApp"
+                            className="text-emerald-600"
+                          >
+                            <MessageCircle className="mr-1.5 h-4 w-4" />
+                            Enviar
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="outline"
                           onClick={() =>
                             router.push(`/dashboard/consignado/novo?kit=${k.id}`)
                           }
@@ -277,7 +333,17 @@ export default function ConsignadoPage() {
                       </div>
                     )}
                     {k.status === "acertado" && (
-                      <div className="flex shrink-0 gap-2">
+                      <div className="flex shrink-0 flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => printKit(kitDocFrom(k))}
+                          title="PDF do kit entregue"
+                          className="text-indigo-600"
+                        >
+                          <FileText className="mr-1.5 h-4 w-4" />
+                          PDF do kit
+                        </Button>
                         <Button
                           size="sm"
                           variant="outline"
@@ -319,7 +385,14 @@ export default function ConsignadoPage() {
                           key={i.id}
                           className="flex items-center justify-between gap-2 p-2 text-xs"
                         >
-                          <span className="truncate">{i.product?.name}</span>
+                          <span className="min-w-0 truncate">
+                            {i.product?.name}
+                            {(i.product?.barcode || i.product?.sku) && (
+                              <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">
+                                {i.product.barcode || i.product.sku}
+                              </span>
+                            )}
+                          </span>
                           <span className="shrink-0 text-muted-foreground">
                             {Number(i.quantity)}x {brl(Number(i.unit_price))}
                             {k.status === "acertado" && (
