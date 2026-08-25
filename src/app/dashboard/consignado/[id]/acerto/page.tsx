@@ -146,6 +146,13 @@ export default function AcertoKitPage() {
     );
   }, [kit, soldMap]);
 
+  // Faixas que valem para este vendedor: as próprias, ou o padrão
+  const effectiveTiers = useMemo(() => {
+    if (!kit) return [];
+    const own = tiers.filter((t) => t.seller_id === kit.seller_id);
+    return own.length > 0 ? own : tiers.filter((t) => t.seller_id === null);
+  }, [tiers, kit]);
+
   // Prevê a comissão usando as mesmas regras do banco
   const percent = useMemo(() => {
     if (!kit) return 0;
@@ -265,6 +272,11 @@ export default function AcertoKitPage() {
         netAmount: Number(r.net_amount),
         paymentLabel: PAYMENT_LABELS[method] || method,
         notes: notes || null,
+        tiers: effectiveTiers.map((t) => ({
+          minAmount: Number(t.min_amount),
+          maxAmount: t.max_amount === null ? null : Number(t.max_amount),
+          percent: Number(t.percent),
+        })),
       };
       setDone(receipt);
     } catch (error: unknown) {

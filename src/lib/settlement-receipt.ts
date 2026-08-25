@@ -12,6 +12,12 @@ export interface SettlementItem {
   unitPrice: number;
 }
 
+export interface CommissionTier {
+  minAmount: number;
+  maxAmount: number | null; // null = sem teto
+  percent: number;
+}
+
 export interface SettlementData {
   kitNumber: number | string;
   sellerName: string;
@@ -24,6 +30,8 @@ export interface SettlementData {
   netAmount: number;
   paymentLabel?: string;
   notes?: string | null;
+  /** Faixas de comissão vigentes do vendedor (para constar no recibo) */
+  tiers?: CommissionTier[];
 }
 
 function brl(v: number): string {
@@ -61,6 +69,34 @@ export function buildSettlementHtml(d: SettlementData): string {
   const totalPecas = d.items.reduce((s, i) => s + i.quantity, 0);
   const totalVendidas = d.items.reduce((s, i) => s + i.sold, 0);
 
+  // Tabela de faixas de comissão (destaca a faixa aplicada)
+  const tiers = (d.tiers || [])
+    .slice()
+    .sort((a, b) => a.minAmount - b.minAmount);
+  const tiersBlock = tiers.length
+    ? `<div class="tiers">
+        <div class="tiers-title">Tabela de comissão do vendedor</div>
+        <table class="tiers-table">
+          <thead><tr><th>Faixa de venda</th><th class="r">Comissão</th></tr></thead>
+          <tbody>
+            ${tiers
+              .map((t) => {
+                const aplicada =
+                  d.totalSold >= t.minAmount &&
+                  (t.maxAmount === null || d.totalSold <= t.maxAmount);
+                return `<tr class="${aplicada ? "on" : ""}">
+                  <td>${brl(t.minAmount)} ${
+                    t.maxAmount === null ? "ou mais" : `a ${brl(t.maxAmount)}`
+                  }${aplicada ? " &nbsp;←&nbsp; <strong>aplicada</strong>" : ""}</td>
+                  <td class="r b">${t.percent}%</td>
+                </tr>`;
+              })
+              .join("")}
+          </tbody>
+        </table>
+      </div>`
+    : "";
+
   return `<!DOCTYPE html>
 <html lang="pt-BR"><head><meta charset="utf-8" />
 <title>Acerto Consignado #${d.kitNumber}</title>
@@ -85,7 +121,14 @@ export function buildSettlementHtml(d: SettlementData): string {
   .totals div { display: flex; justify-content: space-between; padding: 5px 0; }
   .totals .line { border-top: 1px solid #ddd; }
   .totals .final { border-top: 2px solid #111; font-size: 16px; font-weight: 800; padding-top: 8px; }
-  .sign { margin-top: 48px; display: flex; gap: 40px; font-size: 12px; text-align: center; }
+  .tiers { margin-top: 18px; width: 320px; }
+  .tiers-title { font-size: 11px; font-weight: 700; text-transform: uppercase;
+                 letter-spacing: .3px; color: #555; margin-bottom: 4px; }
+  .tiers-table { font-size: 11px; border: 1px solid #ddd; border-radius: 6px; }
+  .tiers-table th { padding: 5px 8px; font-size: 10px; }
+  .tiers-table td { padding: 5px 8px; }
+  .tiers-table tr.on { background: #eef2ff; }
+  .sign { margin-top: 40px; display: flex; gap: 40px; font-size: 12px; text-align: center; }
   .sign div { flex: 1; border-top: 1px solid #111; padding-top: 6px; }
   .foot { margin-top: 26px; font-size: 10px; color: #888; text-align: center; }
 </style></head>
@@ -131,6 +174,8 @@ export function buildSettlementHtml(d: SettlementData): string {
     )}</span></div>
     <div class="final"><span>Valor à loja</span><span>${brl(d.netAmount)}</span></div>
   </div>
+
+  ${tiersBlock}
 
   ${d.notes ? `<div class="box small" style="margin-top:16px"><strong>Observações:</strong> ${esc(d.notes)}</div>` : ""}
 

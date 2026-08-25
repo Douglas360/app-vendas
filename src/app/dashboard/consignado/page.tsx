@@ -38,6 +38,12 @@ import {
 } from "@/lib/settlement-receipt";
 import { buildWhatsappLink } from "@/lib/whatsapp";
 
+interface TierRow {
+  seller_id: string | null;
+  min_amount: number;
+  max_amount: number | null;
+  percent: number;
+}
 interface KitItem {
   id: string;
   product_id: string;
@@ -89,7 +95,10 @@ function kitDocFrom(k: Kit): KitDocData {
 }
 
 // Converte um kit acertado no formato do recibo
-function receiptFrom(k: Kit): SettlementData {
+function receiptFrom(
+  k: Kit,
+  tiers?: SettlementData["tiers"]
+): SettlementData {
   return {
     kitNumber: k.kit_number,
     sellerName: k.seller?.full_name || "Vendedor",
@@ -106,6 +115,7 @@ function receiptFrom(k: Kit): SettlementData {
     commissionAmount: Number(k.commission_amount),
     netAmount: Number(k.net_amount),
     notes: k.notes,
+    tiers,
   };
 }
 
@@ -116,19 +126,38 @@ export default function ConsignadoPage() {
   const isAdmin = profile?.role === "admin";
 
   const [kits, setKits] = useState<Kit[]>([]);
+  const [tiers, setTiers] = useState<TierRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("aberto");
+
+  // Faixas que valem para o vendedor do kit (próprias ou o padrão)
+  function tiersFor(sellerId: string) {
+    const own = tiers.filter((t) => t.seller_id === sellerId);
+    const list = own.length > 0 ? own : tiers.filter((t) => t.seller_id === null);
+    return list.map((t) => ({
+      minAmount: Number(t.min_amount),
+      maxAmount: t.max_amount === null ? null : Number(t.max_amount),
+      percent: Number(t.percent),
+    }));
+  }
 
   const load = useCallback(async () => {
     setIsLoading(true);
     try {
-      const { data } = await supabase
-        .from("consignment_kits")
-        .select(
-          "*, seller:sellers(full_name, phone), items:consignment_kit_items(id, product_id, quantity, unit_price, quantity_sold, product:products(name, image_url, sku, barcode))"
-        )
-        .order("delivered_at", { ascending: false });
-      setKits((data as unknown as Kit[]) || []);
+      const [kRes, tRes] = await Promise.all([
+        supabase
+          .from("consignment_kits")
+          .select(
+            "*, seller:sellers(full_name, phone), items:consignment_kit_items(id, product_id, quantity, unit_price, quantity_sold, product:products(name, image_url, sku, barcode))"
+          )
+          .order("delivered_at", { ascending: false }),
+        supabase
+          .from("commission_tiers")
+          .select("seller_id, min_amount, max_amount, percent")
+          .order("min_amount"),
+      ]);
+      setKits((kRes.data as unknown as Kit[]) || []);
+      setTiers((tRes.data as TierRow[]) || []);
     } finally {
       setIsLoading(false);
     }
@@ -347,7 +376,7 @@ export default function ConsignadoPage() {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => printSettlement(receiptFrom(k))}
+                          onClick={() => printSettlement(receiptFrom(k, tiersFor(k.seller_id)))}
                         >
                           <Printer className="mr-1.5 h-4 w-4" />
                           Recibo
@@ -360,7 +389,7 @@ export default function ConsignadoPage() {
                               window.open(
                                 buildWhatsappLink(
                                   k.seller!.phone!,
-                                  buildSettlementMessage(receiptFrom(k))
+                                  buildSettlementMessage(receiptFrom(k, tiersFor(k.seller_id)))
                                 ),
                                 "_blank"
                               )
