@@ -4,7 +4,7 @@
 // Página dedicada ao ACERTO de um kit consignado.
 // ============================================================
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/components/providers/auth-provider";
@@ -30,7 +30,11 @@ import {
   RotateCcw,
   Printer,
   MessageCircle,
+  Barcode,
+  ScanLine,
+  Undo2,
 } from "lucide-react";
+import { BarcodeScanner } from "@/components/pdv/barcode-scanner";
 import { toast } from "sonner";
 import {
   printSettlement,
@@ -51,7 +55,12 @@ interface KitItem {
   quantity: number;
   unit_price: number;
   quantity_sold: number;
-  product: { name: string; image_url: string | null } | null;
+  product: {
+    name: string;
+    image_url: string | null;
+    sku: string | null;
+    barcode: string | null;
+  } | null;
 }
 interface Kit {
   id: string;
@@ -90,6 +99,11 @@ export default function AcertoKitPage() {
   const [notes, setNotes] = useState("");
   const [isSettling, setIsSettling] = useState(false);
   const [done, setDone] = useState<SettlementData | null>(null);
+  // Modo devolução: bipar o que voltou
+  const [code, setCode] = useState("");
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [lastScanned, setLastScanned] = useState<string | null>(null);
+  const codeRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     if (!kitId) return;
@@ -98,15 +112,16 @@ export default function AcertoKitPage() {
       const { data } = await supabase
         .from("consignment_kits")
         .select(
-          "*, seller:sellers(full_name, phone), items:consignment_kit_items(id, quantity, unit_price, quantity_sold, product:products(name, image_url))"
+          "*, seller:sellers(full_name, phone), items:consignment_kit_items(id, quantity, unit_price, quantity_sold, product:products(name, image_url, sku, barcode))"
         )
         .eq("id", kitId)
         .single();
       const k = data as unknown as Kit | null;
       setKit(k);
       if (k) {
+        // Começa considerando que vendeu TUDO — você bipa só o que voltou
         const map: Record<string, string> = {};
-        k.items.forEach((i) => (map[i.id] = "0"));
+        k.items.forEach((i) => (map[i.id] = String(Number(i.quantity))));
         setSoldMap(map);
         const { data: t } = await supabase
           .from("commission_tiers")
@@ -171,6 +186,43 @@ export default function AcertoKitPage() {
     kit.items.forEach((i) => (map[i.id] = sold ? String(Number(i.quantity)) : "0"));
     setSoldMap(map);
   }
+
+  // Bipar/digitar o código do produto DEVOLVIDO: dá baixa em 1 peça
+  const registerReturn = useCallback(
+    (raw: string) => {
+      const term = raw.trim();
+      if (!term || !kit) return;
+      const item = kit.items.find(
+        (i) =>
+          (i.product?.barcode && i.product.barcode === term) ||
+          (i.product?.sku && i.product.sku.toLowerCase() === term.toLowerCase())
+      );
+      if (!item) {
+        toast.error("Produto não está neste kit", { description: `Código: ${term}` });
+        setCode("");
+        return;
+      }
+      const vendidoAtual = parseFloat(soldMap[item.id] || "0") || 0;
+      if (vendidoAtual <= 0) {
+        toast.warning("Todas as peças deste produto já foram devolvidas", {
+          description: item.product?.name,
+        });
+        setCode("");
+        return;
+      }
+      const novoVendido = vendidoAtual - 1;
+      setSoldMap((prev) => ({ ...prev, [item.id]: String(novoVendido) }));
+      setLastScanned(item.id);
+      setTimeout(() => setLastScanned((cur) => (cur === item.id ? null : cur)), 1500);
+      const devolvidas = Number(item.quantity) - novoVendido;
+      toast.success(`Devolvida: ${item.product?.name}`, {
+        description: `${devolvidas} de ${Number(item.quantity)} devolvida(s)`,
+      });
+      setCode("");
+      codeRef.current?.focus();
+    },
+    [kit, soldMap]
+  );
 
   async function handleSettle() {
     if (!kit) return;
@@ -362,17 +414,62 @@ export default function AcertoKitPage() {
         </p>
       </div>
 
-      {/* Ações rápidas */}
-      <div className="flex flex-wrap gap-2">
-        <Button variant="outline" size="sm" onClick={() => setAll(true)}>
-          <CheckCircle2 className="mr-1.5 h-4 w-4" />
-          Vendeu tudo
-        </Button>
-        <Button variant="outline" size="sm" onClick={() => setAll(false)}>
-          <RotateCcw className="mr-1.5 h-4 w-4" />
-          Limpar
-        </Button>
-      </div>
+      {/* Bipar devoluções */}
+      <Card className="border-2 border-indigo-500/30 shadow-sm">
+        <CardContent className="space-y-3 p-4">
+          <div>
+            <Label htmlFor="ret-code" className="text-base font-bold">
+              Escaneie o que o vendedor DEVOLVEU
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              Começa como &ldquo;vendeu tudo&rdquo;. Cada bipada dá baixa em 1 peça
+              devolvida — o restante é considerado vendido.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Barcode className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                id="ret-code"
+                ref={codeRef}
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    registerReturn(code);
+                  }
+                }}
+                placeholder="Código de barras ou SKU + Enter"
+                className="h-12 pl-10 text-base"
+                autoFocus
+              />
+            </div>
+            <Button
+              type="button"
+              onClick={() => setIsScannerOpen(true)}
+              className="h-12 bg-indigo-600 px-4 text-white hover:bg-indigo-700"
+            >
+              <ScanLine className="mr-2 h-5 w-5" />
+              Câmera
+            </Button>
+          </div>
+          <div className="flex flex-wrap gap-2 border-t pt-2">
+            <Button variant="outline" size="sm" onClick={() => setAll(true)}>
+              <CheckCircle2 className="mr-1.5 h-4 w-4" />
+              Vendeu tudo
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setAll(false)}>
+              <Undo2 className="mr-1.5 h-4 w-4" />
+              Devolveu tudo
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setAll(true)}>
+              <RotateCcw className="mr-1.5 h-4 w-4" />
+              Recomeçar
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Itens */}
       <Card className="border shadow-sm">
@@ -380,8 +477,19 @@ export default function AcertoKitPage() {
           {kit.items.map((i) => {
             const vendido = parseFloat(soldMap[i.id] || "0") || 0;
             const devolve = Number(i.quantity) - vendido;
+            const isLast = lastScanned === i.id;
+            const codigo = i.product?.barcode || i.product?.sku;
             return (
-              <div key={i.id} className="flex items-center gap-3 p-3">
+              <div
+                key={i.id}
+                className={`flex items-center gap-3 p-3 transition-colors ${
+                  isLast
+                    ? "bg-amber-500/15 ring-2 ring-inset ring-amber-500/50"
+                    : devolve > 0
+                    ? "bg-amber-500/5"
+                    : ""
+                }`}
+              >
                 <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border bg-muted/30">
                   {i.product?.image_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -399,41 +507,64 @@ export default function AcertoKitPage() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold">{i.product?.name}</p>
                   <p className="text-xs text-muted-foreground">
+                    {codigo && (
+                      <span className="font-mono">{codigo} · </span>
+                    )}
                     Levou {Number(i.quantity)} · {brl(Number(i.unit_price))} cada
                   </p>
-                  <p className="mt-0.5 text-xs">
-                    <span className="font-semibold text-emerald-600">
+                  <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">
+                    <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 font-semibold text-emerald-600">
                       Vendeu {vendido} = {brl(vendido * Number(i.unit_price))}
                     </span>
                     {devolve > 0 && (
-                      <span className="text-muted-foreground"> · devolve {devolve}</span>
+                      <span className="rounded bg-amber-500/10 px-1.5 py-0.5 font-semibold text-amber-600">
+                        Devolveu {devolve}
+                      </span>
                     )}
                   </p>
                 </div>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  <Input
-                    type="number"
-                    min="0"
-                    max={Number(i.quantity)}
-                    value={soldMap[i.id] ?? "0"}
-                    onChange={(e) =>
-                      setSoldMap((prev) => ({ ...prev, [i.id]: e.target.value }))
-                    }
-                    className="h-10 w-16 text-center font-bold"
-                  />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      setSoldMap((prev) => ({
-                        ...prev,
-                        [i.id]: String(Number(i.quantity)),
-                      }))
-                    }
-                    className="h-10 px-2 text-[11px]"
-                  >
-                    Tudo
-                  </Button>
+                <div className="flex shrink-0 flex-col items-center gap-1">
+                  <div className="flex items-center gap-1">
+                    <Button
+                      size="icon"
+                      variant="outline"
+                      onClick={() =>
+                        setSoldMap((prev) => ({
+                          ...prev,
+                          [i.id]: String(Math.max(0, vendido - 1)),
+                        }))
+                      }
+                      title="Devolveu +1"
+                      className="h-9 w-9 text-amber-600"
+                    >
+                      −
+                    </Button>
+                    <Input
+                      type="number"
+                      min="0"
+                      max={Number(i.quantity)}
+                      value={soldMap[i.id] ?? "0"}
+                      onChange={(e) =>
+                        setSoldMap((prev) => ({ ...prev, [i.id]: e.target.value }))
+                      }
+                      className="h-9 w-14 text-center font-bold"
+                    />
+                    <Button
+                      size="icon"
+                      variant="outline"
+                      onClick={() =>
+                        setSoldMap((prev) => ({
+                          ...prev,
+                          [i.id]: String(Math.min(Number(i.quantity), vendido + 1)),
+                        }))
+                      }
+                      title="Vendeu +1"
+                      className="h-9 w-9 text-emerald-600"
+                    >
+                      +
+                    </Button>
+                  </div>
+                  <span className="text-[10px] text-muted-foreground">vendidas</span>
                 </div>
               </div>
             );
@@ -463,6 +594,10 @@ export default function AcertoKitPage() {
             <div className="flex justify-between border-t pt-2 text-base">
               <span className="font-semibold">Você recebe</span>
               <span className="font-extrabold text-emerald-600">{brl(net)}</span>
+            </div>
+            <div className="flex justify-between border-t pt-2 text-xs">
+              <span className="text-muted-foreground">Peças devolvidas (bipadas)</span>
+              <span className="font-bold text-amber-600">{totalDevolvido}</span>
             </div>
             <p className="text-[11px] text-muted-foreground">
               {totalDevolvido > 0
@@ -519,6 +654,12 @@ export default function AcertoKitPage() {
           </Button>
         </div>
       </div>
+
+      <BarcodeScanner
+        open={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onDetected={registerReturn}
+      />
     </div>
   );
 }
