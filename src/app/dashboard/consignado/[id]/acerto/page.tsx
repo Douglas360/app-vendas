@@ -28,8 +28,23 @@ import {
   Handshake,
   CheckCircle2,
   RotateCcw,
+  Printer,
+  MessageCircle,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  printSettlement,
+  buildSettlementMessage,
+  type SettlementData,
+} from "@/lib/settlement-receipt";
+import { buildWhatsappLink } from "@/lib/whatsapp";
+
+const PAYMENT_LABELS: Record<string, string> = {
+  dinheiro: "Dinheiro",
+  pix: "PIX",
+  cartao_debito: "Cartão Débito",
+  cartao_credito: "Cartão Crédito",
+};
 
 interface KitItem {
   id: string;
@@ -45,7 +60,7 @@ interface Kit {
   status: string;
   delivered_at: string;
   notes: string | null;
-  seller: { full_name: string } | null;
+  seller: { full_name: string; phone: string | null } | null;
   items: KitItem[];
 }
 interface Tier {
@@ -74,6 +89,7 @@ export default function AcertoKitPage() {
   const [method, setMethod] = useState("dinheiro");
   const [notes, setNotes] = useState("");
   const [isSettling, setIsSettling] = useState(false);
+  const [done, setDone] = useState<SettlementData | null>(null);
 
   const load = useCallback(async () => {
     if (!kitId) return;
@@ -82,7 +98,7 @@ export default function AcertoKitPage() {
       const { data } = await supabase
         .from("consignment_kits")
         .select(
-          "*, seller:sellers(full_name), items:consignment_kit_items(id, quantity, unit_price, quantity_sold, product:products(name, image_url))"
+          "*, seller:sellers(full_name, phone), items:consignment_kit_items(id, quantity, unit_price, quantity_sold, product:products(name, image_url))"
         )
         .eq("id", kitId)
         .single();
@@ -177,12 +193,28 @@ export default function AcertoKitPage() {
         commission_amount: number;
         net_amount: number;
       };
-      toast.success("Acerto concluído!", {
-        description: `Vendido ${brl(Number(r.total_sold))} · Comissão ${Number(
-          r.commission_percent
-        )}% (${brl(Number(r.commission_amount))}) · Líquido ${brl(Number(r.net_amount))}`,
-      });
-      router.push("/dashboard/consignado");
+      toast.success("Acerto concluído!");
+
+      // Monta o recibo com o resultado final
+      const receipt: SettlementData = {
+        kitNumber: kit.kit_number,
+        sellerName: kit.seller?.full_name || "Vendedor",
+        deliveredAt: kit.delivered_at,
+        settledAt: new Date().toISOString(),
+        items: kit.items.map((i) => ({
+          name: i.product?.name || "Produto",
+          quantity: Number(i.quantity),
+          sold: parseFloat(soldMap[i.id] || "0") || 0,
+          unitPrice: Number(i.unit_price),
+        })),
+        totalSold: Number(r.total_sold),
+        commissionPercent: Number(r.commission_percent),
+        commissionAmount: Number(r.commission_amount),
+        netAmount: Number(r.net_amount),
+        paymentLabel: PAYMENT_LABELS[method] || method,
+        notes: notes || null,
+      };
+      setDone(receipt);
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "Tente novamente.";
       toast.error("Erro no acerto", { description: msg });
@@ -198,6 +230,78 @@ export default function AcertoKitPage() {
         <p className="text-sm text-muted-foreground">
           Apenas administradores fazem o acerto.
         </p>
+      </div>
+    );
+  }
+
+  // Acerto concluído — recibo
+  if (done) {
+    const waPhone = kit?.seller?.phone;
+    return (
+      <div className="mx-auto max-w-lg space-y-5 py-6">
+        <div className="flex flex-col items-center gap-2 text-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/10">
+            <CheckCircle2 className="h-10 w-10 text-emerald-500" />
+          </div>
+          <h1 className="text-2xl font-bold">Acerto concluído!</h1>
+          <p className="text-sm text-muted-foreground">
+            Kit #{done.kitNumber} · {done.sellerName}
+          </p>
+        </div>
+
+        <Card className="border shadow-sm">
+          <CardContent className="space-y-2 p-4 text-sm">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Total vendido</span>
+              <span className="font-bold text-indigo-600">{brl(done.totalSold)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">
+                Comissão ({done.commissionPercent}%)
+              </span>
+              <span className="font-bold text-amber-600">
+                - {brl(done.commissionAmount)}
+              </span>
+            </div>
+            <div className="flex justify-between border-t pt-2 text-base">
+              <span className="font-semibold">Você recebeu</span>
+              <span className="font-extrabold text-emerald-600">
+                {brl(done.netAmount)}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="space-y-2">
+          <Button
+            onClick={() => printSettlement(done)}
+            className="w-full bg-indigo-600 text-white hover:bg-indigo-700"
+          >
+            <Printer className="mr-2 h-4 w-4" />
+            Imprimir / Salvar PDF
+          </Button>
+          {waPhone && (
+            <Button
+              onClick={() =>
+                window.open(
+                  buildWhatsappLink(waPhone, buildSettlementMessage(done)),
+                  "_blank"
+                )
+              }
+              className="w-full bg-emerald-600 text-white hover:bg-emerald-700"
+            >
+              <MessageCircle className="mr-2 h-4 w-4" />
+              Enviar no WhatsApp do vendedor
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            onClick={() => router.push("/dashboard/consignado")}
+            className="w-full"
+          >
+            Voltar ao consignado
+          </Button>
+        </div>
       </div>
     );
   }
