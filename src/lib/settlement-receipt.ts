@@ -49,9 +49,16 @@ function esc(s: string): string {
     .replace(/>/g, "&gt;");
 }
 
+// Ordena por nome do produto (PT-BR, ignorando acentos/maiúsculas)
+function byName<T extends { name: string }>(list: T[]): T[] {
+  return [...list].sort((a, b) =>
+    a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" })
+  );
+}
+
 export function buildSettlementHtml(d: SettlementData): string {
   const store = getStoreInfo();
-  const rows = d.items
+  const rows = byName(d.items)
     .map((i) => {
       const devolveu = i.quantity - i.sold;
       const total = i.sold * i.unitPrice;
@@ -252,7 +259,7 @@ export interface KitDocData {
 
 export function buildKitHtml(d: KitDocData): string {
   const store = getStoreInfo();
-  const rows = d.items
+  const rows = byName(d.items)
     .map(
       (i) => `<tr>
         <td>${esc(i.name)}</td>
@@ -364,7 +371,7 @@ export function buildKitMessage(d: KitDocData): string {
   lines.push(`👤 ${d.sellerName}`);
   lines.push(`📅 Entrega: ${dt(d.deliveredAt)}`);
   lines.push("──────────────");
-  d.items.forEach((i) => {
+  byName(d.items).forEach((i) => {
     lines.push(`• ${i.name}`);
     lines.push(`   ${i.quantity} x ${brl(i.unitPrice)} = ${brl(i.quantity * i.unitPrice)}`);
   });
@@ -392,7 +399,7 @@ export function buildSettlementMessage(d: SettlementData): string {
   lines.push(`📅 ${dt(d.settledAt)}`);
   lines.push("──────────────");
 
-  d.items
+  byName(d.items)
     .filter((i) => i.sold > 0)
     .forEach((i) => {
       lines.push(`• ${i.name}`);
