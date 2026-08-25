@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { codeMatches } from "@/lib/product-code";
 import { useAuth } from "@/components/providers/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -237,11 +238,7 @@ export default function NovoKitPage() {
     (raw: string) => {
       const term = raw.trim();
       if (!term) return;
-      const found = sellable.find(
-        (p) =>
-          (p.barcode && p.barcode === term) ||
-          (p.sku && p.sku.toLowerCase() === term.toLowerCase())
-      );
+      const found = sellable.find((p) => codeMatches(term, p.barcode, p.sku));
       if (!found) {
         toast.error("Produto não encontrado", { description: `Código: ${term}` });
         return;

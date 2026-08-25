@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { codeMatches } from "@/lib/product-code";
 import { useAuth } from "@/components/providers/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -199,10 +200,8 @@ export default function AcertoKitPage() {
     (raw: string) => {
       const term = raw.trim();
       if (!term || !kit) return;
-      const item = kit.items.find(
-        (i) =>
-          (i.product?.barcode && i.product.barcode === term) ||
-          (i.product?.sku && i.product.sku.toLowerCase() === term.toLowerCase())
+      const item = kit.items.find((i) =>
+        codeMatches(term, i.product?.barcode, i.product?.sku)
       );
       if (!item) {
         toast.error("Produto não está neste kit", { description: `Código: ${term}` });

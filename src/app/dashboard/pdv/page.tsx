@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { createClient } from "@/lib/supabase/client";
+import { codeMatches } from "@/lib/product-code";
 import type { Product, ProductCategory, Customer } from "@/lib/types/database";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -379,7 +380,7 @@ export default function PDVPage() {
     (raw: string): boolean => {
       const code = raw.trim();
       if (!code) return false;
-      const matched = products.find((p) => p.barcode === code || p.sku === code);
+      const matched = products.find((p) => codeMatches(code, p.barcode, p.sku));
       if (matched) {
         addToCart(matched);
         toast.success(`${matched.name} adicionado ao carrinho!`);
