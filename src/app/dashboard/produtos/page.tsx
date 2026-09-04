@@ -54,6 +54,9 @@ import {
   Wand2,
   Undo2,
   History,
+  ChevronUp,
+  ChevronDown,
+  ChevronsUpDown,
 } from "lucide-react";
 import { getStoreInfo } from "@/lib/receipt";
 import { generateStoryBlob, slugify } from "@/lib/story";
@@ -63,6 +66,19 @@ import { toast } from "sonner";
 
 const PRODUCT_IMAGES_BUCKET = "product-images";
 const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+
+// Colunas ordenáveis da tabela de produtos
+type SortKey = "name" | "code" | "category" | "stock" | "cost" | "sale" | "status";
+// Colunas de texto começam em A→Z; as numéricas começam do maior para o menor
+const SORT_DEFAULT_DIR: Record<SortKey, "asc" | "desc"> = {
+  name: "asc",
+  code: "asc",
+  category: "asc",
+  stock: "desc",
+  cost: "desc",
+  sale: "desc",
+  status: "asc",
+};
 
 // Carrega a biblioteca SheetJS (XLSX) via CDN, uma única vez
 function loadXLSX(): Promise<any> {
@@ -101,6 +117,9 @@ export default function ProdutosPage() {
   const [statusFilter, setStatusFilter] = useState<"ativos" | "inativos" | "all">(
     "ativos"
   );
+  // Ordenação da tabela (clique no título da coluna)
+  const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   // Product Dialog State
   const [isProductDialogOpen, setIsProductDialogOpen] = useState(false);
@@ -626,6 +645,39 @@ export default function ProdutosPage() {
     fetchData();
   }, [fetchData]);
 
+  // Valor usado para ordenar cada linha (agrega as variações, igual à tabela)
+  function sortValue(prod: Product): string | number {
+    const children = products.filter((p) => p.parent_id === prod.id);
+    const hasVariants = children.length > 0;
+    switch (sortKey) {
+      case "code":
+        return (prod.barcode || prod.sku || "").toLowerCase();
+      case "category":
+        return (
+          prod.category?.name ||
+          categories.find((c) => c.id === prod.category_id)?.name ||
+          ""
+        ).toLowerCase();
+      case "stock":
+        return hasVariants
+          ? children.reduce((s, v) => s + v.stock_quantity, 0)
+          : prod.stock_quantity;
+      case "cost":
+        return hasVariants
+          ? Math.min(...children.map((c) => c.cost_price))
+          : prod.cost_price;
+      case "sale":
+        return hasVariants
+          ? Math.min(...children.map((c) => c.sale_price))
+          : prod.sale_price;
+      case "status":
+        return prod.is_active ? 0 : 1;
+      case "name":
+      default:
+        return prod.name.toLowerCase();
+    }
+  }
+
   // Filter Products
   const filteredProducts = products
     .filter((p) => !p.parent_id)
@@ -651,7 +703,63 @@ export default function ProdutosPage() {
         (statusFilter === "ativos" ? prod.is_active : !prod.is_active);
 
       return matchesSearch && matchesCategory && matchesStatus;
+    })
+    .sort((a, b) => {
+      const dir = sortDir === "asc" ? 1 : -1;
+      const av = sortValue(a);
+      const bv = sortValue(b);
+      if (typeof av === "number" && typeof bv === "number") {
+        if (av !== bv) return (av - bv) * dir;
+      } else {
+        const cmp = String(av).localeCompare(String(bv), "pt-BR", {
+          sensitivity: "base",
+          numeric: true,
+        });
+        if (cmp !== 0) return cmp * dir;
+      }
+      // Empate: mantém previsível ordenando pelo nome
+      return a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" });
     });
+
+  // Alterna a ordenação ao clicar no título da coluna
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir(SORT_DEFAULT_DIR[key]);
+    }
+  }
+
+  // Cabeçalho clicável com indicador de ordenação
+  function sortIcon(key: SortKey) {
+    if (sortKey !== key)
+      return <ChevronsUpDown className="h-3.5 w-3.5 opacity-30" />;
+    return sortDir === "asc" ? (
+      <ChevronUp className="h-3.5 w-3.5 text-indigo-500" />
+    ) : (
+      <ChevronDown className="h-3.5 w-3.5 text-indigo-500" />
+    );
+  }
+  function sortButton(key: SortKey, label: string, align: "left" | "right" | "center" = "left") {
+    return (
+      <button
+        type="button"
+        onClick={() => toggleSort(key)}
+        title="Clique para ordenar"
+        className={`flex w-full items-center gap-1 select-none hover:text-foreground ${
+          align === "right"
+            ? "justify-end"
+            : align === "center"
+              ? "justify-center"
+              : "justify-start"
+        } ${sortKey === key ? "text-foreground" : ""}`}
+      >
+        {label}
+        {sortIcon(key)}
+      </button>
+    );
+  }
 
   // Open Dialog to Create Product
   function handleAddProduct() {
@@ -1735,7 +1843,7 @@ export default function ProdutosPage() {
                     className="relative select-none"
                     style={{ width: nameColWidth }}
                   >
-                    Produto
+                    <span className="pr-3 block">{sortButton("name", "Produto")}</span>
                     <span
                       onPointerDown={handleNameColResize}
                       title="Arraste para ajustar a largura"
@@ -1744,12 +1852,20 @@ export default function ProdutosPage() {
                       <span className="h-4 w-px bg-border" />
                     </span>
                   </TableHead>
-                  <TableHead>SKU / Cód. Barras</TableHead>
-                  <TableHead>Categoria</TableHead>
-                  <TableHead className="text-right">Estoque</TableHead>
-                  <TableHead className="text-right">Custo</TableHead>
-                  <TableHead className="text-right">Venda</TableHead>
-                  <TableHead className="text-center">Status</TableHead>
+                  <TableHead>{sortButton("code", "SKU / Cód. Barras")}</TableHead>
+                  <TableHead>{sortButton("category", "Categoria")}</TableHead>
+                  <TableHead className="text-right">
+                    {sortButton("stock", "Estoque", "right")}
+                  </TableHead>
+                  <TableHead className="text-right">
+                    {sortButton("cost", "Custo", "right")}
+                  </TableHead>
+                  <TableHead className="text-right">
+                    {sortButton("sale", "Venda", "right")}
+                  </TableHead>
+                  <TableHead className="text-center">
+                    {sortButton("status", "Status", "center")}
+                  </TableHead>
                   {isAdmin && <TableHead className="text-right">Ações</TableHead>}
                 </TableRow>
               </TableHeader>
@@ -1969,6 +2085,36 @@ export default function ProdutosPage() {
           </div>
 
           {/* ----- Lista simplificada (celular) ----- */}
+          <div className="flex items-center gap-2 border-b p-3 md:hidden">
+            <span className="shrink-0 text-xs text-muted-foreground">Ordenar por</span>
+            <Select value={sortKey} onValueChange={(v) => toggleSort(v as SortKey)}>
+              <SelectTrigger className="h-8 flex-1 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="name">Produto</SelectItem>
+                <SelectItem value="code">SKU / Cód. Barras</SelectItem>
+                <SelectItem value="category">Categoria</SelectItem>
+                <SelectItem value="stock">Estoque</SelectItem>
+                <SelectItem value="cost">Custo</SelectItem>
+                <SelectItem value="sale">Venda</SelectItem>
+                <SelectItem value="status">Status</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 shrink-0 px-2"
+              title={sortDir === "asc" ? "Crescente" : "Decrescente"}
+              onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+            >
+              {sortDir === "asc" ? (
+                <ChevronUp className="h-4 w-4" />
+              ) : (
+                <ChevronDown className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
           <div className="divide-y md:hidden">
             {filteredProducts.map((prod) => {
               const children = products.filter((p) => p.parent_id === prod.id);
