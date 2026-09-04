@@ -236,14 +236,15 @@ export default function DashboardPage() {
         .select(`
           quantity,
           total,
-          product:products(id, name)
+          product:products(id, name, is_active)
         `)
         .limit(200);
 
       const prodAgg: Record<string, { name: string; qty: number; total: number }> = {};
       saleItems?.forEach((item: any) => {
         const p = (item as any).product;
-        if (!p?.id) return;
+        // Não lista produtos inativos no dashboard
+        if (!p?.id || p.is_active === false) return;
         if (!prodAgg[p.id]) {
           prodAgg[p.id] = { name: p.name, qty: 0, total: 0 };
         }

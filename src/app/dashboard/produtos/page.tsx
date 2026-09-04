@@ -97,6 +97,10 @@ export default function ProdutosPage() {
   // Search & Filter State
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
+  // Por padrão a lista mostra apenas produtos ativos
+  const [statusFilter, setStatusFilter] = useState<"ativos" | "inativos" | "all">(
+    "ativos"
+  );
 
   // Product Dialog State
   const [isProductDialogOpen, setIsProductDialogOpen] = useState(false);
@@ -642,7 +646,11 @@ export default function ProdutosPage() {
       const matchesCategory =
         selectedCategory === "all" || prod.category_id === selectedCategory;
 
-      return matchesSearch && matchesCategory;
+      const matchesStatus =
+        statusFilter === "all" ||
+        (statusFilter === "ativos" ? prod.is_active : !prod.is_active);
+
+      return matchesSearch && matchesCategory && matchesStatus;
     });
 
   // Open Dialog to Create Product
@@ -1054,13 +1062,25 @@ export default function ProdutosPage() {
     (p) => !products.some((c) => c.parent_id === p.id)
   );
 
+  // Um produto só é considerado ativo se ele e o "pai" (quando existe) estiverem ativos
+  const isProductActive = (p: Product) => {
+    if (!p.is_active) return false;
+    if (!p.parent_id) return true;
+    const parent = products.find((x) => x.id === p.parent_id);
+    return parent ? parent.is_active : true;
+  };
+
   // ---- Valor em estoque ----
-  const stockUnits = sellableProducts.reduce((s, p) => s + p.stock_quantity, 0);
-  const stockCostValue = sellableProducts.reduce(
+  // Os indicadores acompanham o filtro de status aplicado na lista
+  const statsProducts = sellableProducts.filter((p) =>
+    statusFilter === "all" ? true : statusFilter === "ativos" ? isProductActive(p) : !isProductActive(p)
+  );
+  const stockUnits = statsProducts.reduce((s, p) => s + p.stock_quantity, 0);
+  const stockCostValue = statsProducts.reduce(
     (s, p) => s + p.stock_quantity * p.cost_price,
     0
   );
-  const stockSaleValue = sellableProducts.reduce(
+  const stockSaleValue = statsProducts.reduce(
     (s, p) => s + p.stock_quantity * p.sale_price,
     0
   );
@@ -1083,9 +1103,9 @@ export default function ProdutosPage() {
     return out;
   };
 
-  // Escopo das etiquetas: seleção (se houver) ou todos os vendáveis
+  // Escopo das etiquetas: seleção (se houver) ou os vendáveis do filtro atual
   const labelScope =
-    selectedIds.size > 0 ? expandSelection(selectedIds) : sellableProducts;
+    selectedIds.size > 0 ? expandSelection(selectedIds) : statsProducts;
   const missingBarcodeCount = labelScope.filter(
     (p) => !p.barcode || p.barcode.trim() === ""
   ).length;
@@ -1212,7 +1232,7 @@ export default function ProdutosPage() {
 
   // ---- Artes de divulgação (Story) ----
   async function handleOpenStories() {
-    const scope = (selectedIds.size > 0 ? labelScope : sellableProducts).slice(0, 20);
+    const scope = (selectedIds.size > 0 ? labelScope : statsProducts).slice(0, 20);
     if (scope.length === 0) {
       toast.error("Selecione ao menos um produto.");
       return;
@@ -1587,6 +1607,23 @@ export default function ProdutosPage() {
               </SelectContent>
             </Select>
           </div>
+          <div className="w-full md:w-48">
+            <Select
+              value={statusFilter}
+              onValueChange={(v) =>
+                setStatusFilter(v as "ativos" | "inativos" | "all")
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ativos">Somente ativos</SelectItem>
+                <SelectItem value="inativos">Somente inativos</SelectItem>
+                <SelectItem value="all">Todos os status</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </CardContent>
       </Card>
 
@@ -1652,7 +1689,7 @@ export default function ProdutosPage() {
                 {stockUnits.toLocaleString("pt-BR")}
               </p>
               <p className="mt-0.5 text-[11px] text-muted-foreground">
-                {sellableProducts.length} produto(s) no catálogo
+                {statsProducts.length} produto(s) no catálogo
               </p>
             </CardContent>
           </Card>
