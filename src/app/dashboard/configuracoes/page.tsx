@@ -921,9 +921,9 @@ export default function ConfiguracoesPage() {
               <div>
                 <p className="text-sm font-semibold">Lembrete de crediário ao cliente</p>
                 <p className="text-xs text-muted-foreground">
-                  Envia automaticamente (às 9h) uma mensagem amigável ao cliente sobre parcelas que
-                  vencem amanhã, hoje ou estão atrasadas. Requer WhatsApp conectado e telefone no
-                  cadastro do cliente.
+                  Envia automaticamente (às 9h) uma mensagem ao cliente sobre parcelas que vencem
+                  em 3 dias, vencem hoje ou estão atrasadas. Requer WhatsApp conectado e telefone
+                  no cadastro do cliente.
                 </p>
               </div>
               <input
@@ -973,7 +973,7 @@ export default function ConfiguracoesPage() {
                 },
                 {
                   key: "lembrete_vespera" as const,
-                  label: "Lembrete — vence amanhã",
+                  label: "Lembrete — vence amanhã (só no envio manual)",
                   preview: previewCollection("vespera"),
                 },
                 {

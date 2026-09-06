@@ -365,7 +365,7 @@ export default function NotificacoesPage() {
           />
           <NotifCard
             title="Lembrete de crediário"
-            description="Mensagem profissional avisando o cliente sobre parcelas que vencem amanhã, vencem hoje ou estão atrasadas, com a chave PIX."
+            description="Mensagem profissional avisando o cliente sobre parcelas que vencem em 3 dias, vencem hoje ou estão atrasadas, com a chave PIX."
             channel="whatsapp"
             audience="Cliente com telefone"
             trigger="Todo dia às 9h (automático)"

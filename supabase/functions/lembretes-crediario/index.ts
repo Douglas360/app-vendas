@@ -239,7 +239,9 @@ Deno.serve(async (req) => {
       else bucket = "atrasada";
 
       // ---- WhatsApp para o CLIENTE (profissional) ----
-      if (waEnabled && evoOk && cust.phone) {
+      // O cliente recebe 3 dias antes, no dia do vencimento e em atraso.
+      // A véspera (1 dia antes) fica apenas como aviso interno para o admin.
+      if (waEnabled && evoOk && cust.phone && bucket !== "vespera") {
         const number = normalizePhone(cust.phone);
         if (number) {
           // idempotência: 1 envio por parcela/bucket/dia
