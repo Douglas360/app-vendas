@@ -1,0 +1,21 @@
+project_id = "app-vendas"
+
+# ============================================================
+# Configuração das Edge Functions.
+#
+# IMPORTANTE: sem este arquivo a CLI publica tudo com
+# verify_jwt = true. A função de lembretes é chamada pelo
+# pg_cron, que não manda JWT — ela se autentica sozinha pelo
+# header x-cron-secret. Se o JWT ficar ligado, o cron leva 401
+# e nenhuma notificação é enviada.
+# ============================================================
+
+[functions.lembretes-crediario]
+verify_jwt = false
+
+# Chamadas a partir do app (usuário logado): exigem JWT.
+[functions.send-whatsapp]
+verify_jwt = true
+
+[functions.stylize-image]
+verify_jwt = true
