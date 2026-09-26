@@ -540,7 +540,7 @@ export default function PDVPage() {
   };
 
   // Retoma uma venda em aberto, carregando os itens no carrinho
-  const handleResumeOpenSale = (sale: OpenSaleRow) => {
+  const handleResumeOpenSale = useCallback((sale: OpenSaleRow) => {
     const items: CartItem[] = (sale.items || [])
       .filter((it) => it.product)
       .map((it) => ({
@@ -557,7 +557,25 @@ export default function PDVPage() {
     setIsOpenSalesDialogOpen(false);
     setMobileStep(2);
     toast.success(`Comanda #${sale.sale_number} retomada.`);
-  };
+  }, []);
+
+  // Abre direto uma comanda quando vem de Vendas (?comanda=<id>)
+  const resumedFromUrl = useRef(false);
+  useEffect(() => {
+    if (resumedFromUrl.current || openSales.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("comanda");
+    if (!id) return;
+    const sale = openSales.find((s) => s.id === id);
+    resumedFromUrl.current = true;
+    if (sale) {
+      handleResumeOpenSale(sale);
+    } else {
+      toast.error("Esta venda não está mais em aberto.");
+    }
+    // Limpa o parâmetro para não retomar de novo ao recarregar
+    window.history.replaceState({}, "", window.location.pathname);
+  }, [openSales, handleResumeOpenSale]);
 
   // Descarta uma venda em aberto
   const handleDiscardOpenSale = async (sale: OpenSaleRow) => {

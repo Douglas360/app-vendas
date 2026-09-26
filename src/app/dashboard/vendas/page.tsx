@@ -42,7 +42,9 @@ import {
   Clock,
   CheckCircle,
   Printer,
+  PlayCircle,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { printReceipt, getStoreInfo, type ReceiptData } from "@/lib/receipt";
 
@@ -56,6 +58,12 @@ const PAYMENT_LABELS: Record<string, string> = {
 
 export default function VendasPage() {
   const supabase = createClient();
+  const router = useRouter();
+
+  // Retoma uma venda em aberto no PDV para editar/finalizar
+  function handleResumeSale(saleId: string) {
+    router.push(`/dashboard/pdv?comanda=${saleId}`);
+  }
 
   const [sales, setSales] = useState<Sale[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -429,6 +437,17 @@ export default function VendasPage() {
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
+                        {sale.status === "aberta" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleResumeSale(sale.id)}
+                            title="Retomar no PDV para editar/finalizar"
+                            className="h-8 w-8 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-500/10"
+                          >
+                            <PlayCircle className="h-4 w-4" />
+                          </Button>
+                        )}
                         {sale.status !== "cancelada" && (
                           <Button
                             variant="ghost"
@@ -614,6 +633,15 @@ export default function VendasPage() {
               <div />
             )}
             <div className="flex items-center gap-2">
+              {selectedSale && selectedSale.status === "aberta" && (
+                <Button
+                  onClick={() => handleResumeSale(selectedSale.id)}
+                  className="bg-emerald-600 font-medium text-white hover:bg-emerald-700"
+                >
+                  <PlayCircle className="mr-2 h-4 w-4" />
+                  Editar / Finalizar
+                </Button>
+              )}
               {selectedSale && selectedSale.status !== "cancelada" && (
                 <Button
                   variant="outline"
