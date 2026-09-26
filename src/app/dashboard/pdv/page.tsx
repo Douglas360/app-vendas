@@ -1315,9 +1315,9 @@ export default function PDVPage() {
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                {["1", "2", "3", "4", "6", "12"].map((n) => (
-                                  <SelectItem key={n} value={n}>
-                                    {n}x de R$ {(grandTotal / parseInt(n)).toFixed(2)}
+                                {Array.from({ length: 12 }).map((_, idx) => (
+                                  <SelectItem key={idx} value={(idx + 1).toString()}>
+                                    {idx + 1}x de R$ {(grandTotal / (idx + 1)).toFixed(2)}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
