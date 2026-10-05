@@ -415,22 +415,26 @@ export interface MessageTemplates {
 export const DEFAULT_TEMPLATES: MessageTemplates = {
   lembrete_3dias:
     "Olá, {primeiro_nome}.\n\n" +
-    "Lembrete: a parcela de *{valor}* referente à sua compra vence em *{vencimento}* (daqui a 3 dias).\n\n" +
+    "Lembrete: *{qtd} {parcela}* no valor de *{valor}* {vence} em *{vencimento}* (daqui a 3 dias).\n\n" +
+    "{parcelas}\n\n" +
     "Você pode efetuar o pagamento via PIX na chave *{pix}*. Após o pagamento, envie o comprovante por aqui.\n\n" +
     "Caso o pagamento já tenha sido efetuado, desconsidere esta mensagem.\n\n{loja}",
   lembrete_vespera:
     "Olá, {primeiro_nome}.\n\n" +
-    "Lembrete: a parcela de *{valor}* referente à sua compra vence *amanhã ({vencimento})*.\n\n" +
+    "Lembrete: *{qtd} {parcela}* no valor de *{valor}* {vence} *amanhã ({vencimento})*.\n\n" +
+    "{parcelas}\n\n" +
     "Você pode efetuar o pagamento via PIX na chave *{pix}*. Após o pagamento, envie o comprovante por aqui.\n\n" +
     "Caso o pagamento já tenha sido efetuado, desconsidere esta mensagem.\n\n{loja}",
   lembrete_hoje:
     "Olá, {primeiro_nome}.\n\n" +
-    "A parcela de *{valor}* referente à sua compra vence *hoje ({vencimento})*.\n\n" +
+    "*{qtd} {parcela}* no valor de *{valor}* {vence} *hoje ({vencimento})*.\n\n" +
+    "{parcelas}\n\n" +
     "Você pode efetuar o pagamento via PIX na chave *{pix}*. Após o pagamento, envie o comprovante por aqui.\n\n" +
     "Caso o pagamento já tenha sido efetuado, desconsidere esta mensagem.\n\n{loja}",
   lembrete_atraso:
     "Olá, {primeiro_nome}.\n\n" +
-    "Consta em aberto a parcela de *{valor}*, vencida em *{vencimento}*.\n\n" +
+    "Consta em aberto *{qtd} {parcela}* no valor de *{valor}*, com vencimento desde *{vencimento}*.\n\n" +
+    "{parcelas}\n\n" +
     "Para regularizar, efetue o pagamento via PIX na chave *{pix}* e envie o comprovante por aqui.\n\n" +
     "Caso o pagamento já tenha sido efetuado, desconsidere esta mensagem.\n\n{loja}",
   confirmacao_pagamento:
@@ -525,6 +529,7 @@ export function buildCollectionMessage(input: {
       ? t.lembrete_vespera
       : t.lembrete_3dias;
 
+  // Envio manual é sempre de uma parcela: concordância no singular e sem lista
   return applyTemplate(tpl, {
     primeiro_nome: firstName,
     cliente: input.customerName,
@@ -532,7 +537,14 @@ export function buildCollectionMessage(input: {
     vencimento: dueStr,
     pix: store.pixKey || "",
     loja: store.name || "",
-  });
+    parcelas: "",
+    qtd: "1",
+    parcela: "parcela",
+    a_parcela: "a parcela",
+    vence: "vence",
+  })
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 // Envia o comprovante para o WhatsApp do cliente.

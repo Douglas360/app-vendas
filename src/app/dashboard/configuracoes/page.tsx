@@ -271,12 +271,25 @@ export default function ConfiguracoesPage() {
       {
         primeiro_nome: "Maria",
         cliente: "Maria Silva",
-        valor: "R$ 99,90",
+        valor: "R$ 304,76",
         vencimento: new Date(iso + "T00:00:00").toLocaleDateString("pt-BR"),
         pix: store.pixKey || "(sua chave PIX)",
         loja: store.name || "Sua Loja",
+        // Exemplo com duas parcelas, para visualizar a lista e a concordância
+        qtd: "2",
+        parcela: "parcelas",
+        a_parcela: "as parcelas",
+        vence: "vencem",
+        parcelas:
+          "Parcelas:\n" +
+          "• Venda #59 · parcela 2 · R$ 99,90 · venc. " +
+          new Date(iso + "T00:00:00").toLocaleDateString("pt-BR") +
+          "\n• Venda #91 · parcela 1 · R$ 204,86 · venc. " +
+          new Date(iso + "T00:00:00").toLocaleDateString("pt-BR"),
       }
-    );
+    )
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
   }
 
   function previewPayment(): string {
@@ -962,6 +975,17 @@ export default function ConfiguracoesPage() {
               <code>{"{vencimento}"}</code>, <code>{"{pix}"}</code>, <code>{"{loja}"}</code>. Na
               confirmação de pagamento também: <code>{"{valor_pago}"}</code>, <code>{"{parcela}"}</code>,{" "}
               <code>{"{venda}"}</code>, <code>{"{status_parcela}"}</code>, <code>{"{saldo_linha}"}</code>.
+              <p className="mt-2">
+                <span className="font-semibold text-foreground">
+                  Quando o cliente tem mais de uma parcela no mesmo aviso
+                </span>{" "}
+                ele recebe <strong>uma única mensagem</strong>: <code>{"{valor}"}</code> vira o total
+                e <code>{"{parcelas}"}</code> lista cada uma. Para a frase concordar nos dois casos,
+                use <code>{"{qtd}"}</code> (1 ou 2…), <code>{"{parcela}"}</code> (parcela/parcelas) e{" "}
+                <code>{"{vence}"}</code> (vence/vencem). Se você remover{" "}
+                <code>{"{parcelas}"}</code> do modelo, a lista entra automaticamente antes da
+                assinatura.
+              </p>
             </div>
 
             {(

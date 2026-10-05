@@ -33,7 +33,8 @@ function normalizePhone(phone: string): string {
 const DEFAULT_TEMPLATES: Record<string, string> = {
   lembrete_3dias:
     "Olá, {primeiro_nome}.\n\n" +
-    "Lembrete: a parcela de *{valor}* referente à sua compra vence em *{vencimento}* (daqui a 3 dias).\n\n" +
+    "Lembrete: *{qtd} {parcela}* no valor de *{valor}* {vence} em *{vencimento}* (daqui a 3 dias).\n\n" +
+    "{parcelas}\n\n" +
     "Você pode efetuar o pagamento via PIX na chave *{pix}*. Após o pagamento, envie o comprovante por aqui.\n\n" +
     "Caso o pagamento já tenha sido efetuado, desconsidere esta mensagem.\n\n{loja}",
   lembrete_vespera:
@@ -43,12 +44,14 @@ const DEFAULT_TEMPLATES: Record<string, string> = {
     "Caso o pagamento já tenha sido efetuado, desconsidere esta mensagem.\n\n{loja}",
   lembrete_hoje:
     "Olá, {primeiro_nome}.\n\n" +
-    "A parcela de *{valor}* referente à sua compra vence *hoje ({vencimento})*.\n\n" +
+    "*{qtd} {parcela}* no valor de *{valor}* {vence} *hoje ({vencimento})*.\n\n" +
+    "{parcelas}\n\n" +
     "Você pode efetuar o pagamento via PIX na chave *{pix}*. Após o pagamento, envie o comprovante por aqui.\n\n" +
     "Caso o pagamento já tenha sido efetuado, desconsidere esta mensagem.\n\n{loja}",
   lembrete_atraso:
     "Olá, {primeiro_nome}.\n\n" +
-    "Consta em aberto a parcela de *{valor}*, vencida em *{vencimento}*.\n\n" +
+    "Consta em aberto *{qtd} {parcela}* no valor de *{valor}*, com vencimento desde *{vencimento}*.\n\n" +
+    "{parcelas}\n\n" +
     "Para regularizar, efetue o pagamento via PIX na chave *{pix}* e envie o comprovante por aqui.\n\n" +
     "Caso o pagamento já tenha sido efetuado, desconsidere esta mensagem.\n\n{loja}",
 };
@@ -63,7 +66,26 @@ function applyTemplate(tpl: string, vars: Record<string, string>): string {
 const WA_DELAY_MS = 10000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// Mensagem para o cliente conforme o vencimento (usa os modelos editáveis)
+// Detalhamento usado quando o cliente tem mais de uma parcela no mesmo aviso
+interface ParcelaLinha {
+  saleNo: number | string;
+  number: number;
+  amount: number;
+  dueDate: string;
+}
+function buildInstallmentsBlock(items: ParcelaLinha[]): string {
+  const linhas = items
+    .map(
+      (i) =>
+        `• Venda #${i.saleNo} · parcela ${i.number} · ${brl(i.amount)} · venc. ${fmtDate(i.dueDate)}`
+    )
+    .join("\n");
+  return `Parcelas:\n${linhas}`;
+}
+
+// Mensagem para o cliente conforme o vencimento (usa os modelos editáveis).
+// Quando há mais de uma parcela no mesmo aviso, {valor} é o TOTAL e as
+// parcelas são detalhadas em uma lista.
 function buildCustomerMessage(
   bucket: string,
   firstName: string,
@@ -72,7 +94,8 @@ function buildCustomerMessage(
   dueDate: string,
   storeName: string,
   pixKey: string,
-  templates: Record<string, string>
+  templates: Record<string, string>,
+  items: ParcelaLinha[] = []
 ): string {
   const key =
     bucket === "atrasada"
@@ -83,14 +106,32 @@ function buildCustomerMessage(
       ? "lembrete_3dias"
       : "lembrete_vespera";
   const tpl = templates[key] || DEFAULT_TEMPLATES[key];
-  return applyTemplate(tpl, {
+  const varias = items.length > 1;
+  const bloco = varias ? buildInstallmentsBlock(items) : "";
+  let msg = applyTemplate(tpl, {
     primeiro_nome: firstName,
     cliente: fullName,
     valor: brl(remaining),
     vencimento: fmtDate(dueDate),
     pix: pixKey || "",
     loja: storeName || "",
+    parcelas: bloco,
+    // Concordância: o mesmo modelo serve para uma ou várias parcelas
+    qtd: String(Math.max(items.length, 1)),
+    parcela: varias ? "parcelas" : "parcela",
+    a_parcela: varias ? "as parcelas" : "a parcela",
+    vence: varias ? "vencem" : "vence",
   });
+  // Modelo sem o marcador {parcelas}: insere a lista antes do último
+  // parágrafo (a assinatura), em vez de jogar no fim de tudo.
+  if (bloco && !tpl.includes("{parcelas}")) {
+    const partes = msg.split("\n\n");
+    if (partes.length > 1) partes.splice(partes.length - 1, 0, bloco);
+    else partes.push(bloco);
+    msg = partes.join("\n\n");
+  }
+  // Limpa linhas em branco sobrando (acontece quando {parcelas} fica vazio)
+  return msg.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 Deno.serve(async (req) => {
@@ -216,8 +257,22 @@ Deno.serve(async (req) => {
       pushed: 0,
       removed: 0,
       waSent: 0,
+      waParcelas: 0,
       errors: [] as string[],
     };
+
+    // Parcelas que renderão mensagem ao cliente, para agrupar depois
+    interface Pendente {
+      instId: string;
+      saleId: string | null;
+      saleNo: number | string;
+      number: number;
+      remaining: number;
+      dueDate: string;
+      bucket: string;
+      cust: { id: string; full_name: string; phone: string | null };
+    }
+    const pendentes: Pendente[] = [];
 
     for (const inst of insts || []) {
       const remaining = Number(inst.amount) - Number(inst.amount_paid);
@@ -238,88 +293,21 @@ Deno.serve(async (req) => {
       else if (inst.due_date === todayStr) bucket = "hoje";
       else bucket = "atrasada";
 
-      // ---- WhatsApp para o CLIENTE (profissional) ----
+      // ---- WhatsApp para o CLIENTE ----
       // O cliente recebe 3 dias antes, no dia do vencimento e em atraso.
       // A véspera (1 dia antes) fica apenas como aviso interno para o admin.
+      // Aqui só coletamos: o envio acontece agrupado por cliente, mais abaixo.
       if (waEnabled && evoOk && cust.phone && bucket !== "vespera") {
-        const number = normalizePhone(cust.phone);
-        if (number) {
-          // idempotência: 1 envio por parcela/bucket/dia
-          const { data: logIns } = await supabase
-            .from("whatsapp_reminders_log")
-            .upsert(
-              { installment_id: inst.id, bucket, sent_on: todayStr },
-              { onConflict: "installment_id,bucket,sent_on", ignoreDuplicates: true }
-            )
-            .select();
-
-          if (logIns && logIns.length > 0) {
-            const firstName = cust.full_name.split(" ")[0] || cust.full_name;
-            const msg = buildCustomerMessage(
-              bucket,
-              firstName,
-              cust.full_name,
-              remaining,
-              inst.due_date,
-              storeName,
-              pixKey,
-              templates
-            );
-            const logTitle =
-              bucket === "tres_dias"
-                ? "Lembrete: vence em 3 dias"
-                : bucket === "vespera"
-                ? "Lembrete: vence amanhã"
-                : bucket === "hoje"
-                ? "Lembrete: vence hoje"
-                : "Lembrete: parcela atrasada";
-            const { data: nlog } = await supabase
-              .from("notification_log")
-              .insert({
-                channel: "whatsapp",
-                kind: "lembrete",
-                recipient_type: "cliente",
-                customer_id: cust.id,
-                recipient_name: cust.full_name,
-                recipient_phone: number,
-                title: logTitle,
-                body: msg,
-                status: "em_andamento",
-                installment_id: inst.id,
-                sale_id: inst.sale_id ?? null,
-              })
-              .select("id")
-              .single();
-            try {
-              // Espaça os envios (menos o primeiro) para não disparar em rajada
-              if (results.waSent > 0) await sleep(WA_DELAY_MS);
-              await sendWhatsAppText(number, msg);
-              results.waSent++;
-              if (nlog?.id)
-                await supabase
-                  .from("notification_log")
-                  .update({ status: "enviado" })
-                  .eq("id", nlog.id);
-            } catch (e) {
-              // libera o log para nova tentativa numa próxima execução do dia
-              await supabase
-                .from("whatsapp_reminders_log")
-                .delete()
-                .eq("installment_id", inst.id)
-                .eq("bucket", bucket)
-                .eq("sent_on", todayStr);
-              if (nlog?.id)
-                await supabase
-                  .from("notification_log")
-                  .update({
-                    status: "falhou",
-                    error: String((e as Error)?.message || e),
-                  })
-                  .eq("id", nlog.id);
-              results.errors.push("wa:" + String((e as Error)?.message || e));
-            }
-          }
-        }
+        pendentes.push({
+          instId: inst.id,
+          saleId: inst.sale_id ?? null,
+          saleNo,
+          number: inst.installment_number,
+          remaining,
+          dueDate: inst.due_date,
+          bucket,
+          cust: { id: cust.id, full_name: cust.full_name, phone: cust.phone },
+        });
       }
 
       // ---- Push + sininho para os ADMINS ----
@@ -373,6 +361,119 @@ Deno.serve(async (req) => {
             }
           }
         }
+      }
+    }
+
+    // ============================================================
+    // WhatsApp ao cliente: UMA mensagem por cliente/tipo de aviso.
+    // Se a pessoa tem duas parcelas vencendo no mesmo dia, ela recebe
+    // uma única mensagem com o total e a lista das parcelas.
+    // ============================================================
+    const grupos = new Map<string, Pendente[]>();
+    for (const p of pendentes) {
+      const key = `${p.cust.id}:${p.bucket}`;
+      const atual = grupos.get(key);
+      if (atual) atual.push(p);
+      else grupos.set(key, [p]);
+    }
+
+    for (const grupo of grupos.values()) {
+      grupo.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+      const { cust, bucket } = grupo[0];
+      const number = normalizePhone(cust.phone || "");
+      if (!number) continue;
+
+      // Idempotência: marca todas as parcelas do grupo. Se nenhuma for nova,
+      // a mensagem do dia já saiu — não reenvia.
+      const { data: logIns } = await supabase
+        .from("whatsapp_reminders_log")
+        .upsert(
+          grupo.map((p) => ({
+            installment_id: p.instId,
+            bucket,
+            sent_on: todayStr,
+          })),
+          { onConflict: "installment_id,bucket,sent_on", ignoreDuplicates: true }
+        )
+        .select();
+      if (!logIns || logIns.length === 0) continue;
+
+      const total = grupo.reduce((s, p) => s + p.remaining, 0);
+      const firstName = cust.full_name.split(" ")[0] || cust.full_name;
+      const msg = buildCustomerMessage(
+        bucket,
+        firstName,
+        cust.full_name,
+        total,
+        grupo[0].dueDate,
+        storeName,
+        pixKey,
+        templates,
+        grupo.map((p) => ({
+          saleNo: p.saleNo,
+          number: p.number,
+          amount: p.remaining,
+          dueDate: p.dueDate,
+        }))
+      );
+
+      const base =
+        bucket === "tres_dias"
+          ? "Lembrete: vence em 3 dias"
+          : bucket === "hoje"
+          ? "Lembrete: vence hoje"
+          : "Lembrete: parcela atrasada";
+      const logTitle = grupo.length > 1 ? `${base} (${grupo.length} parcelas)` : base;
+
+      const { data: nlog } = await supabase
+        .from("notification_log")
+        .insert({
+          channel: "whatsapp",
+          kind: "lembrete",
+          recipient_type: "cliente",
+          customer_id: cust.id,
+          recipient_name: cust.full_name,
+          recipient_phone: number,
+          title: logTitle,
+          body: msg,
+          status: "em_andamento",
+          installment_id: grupo[0].instId,
+          sale_id: grupo[0].saleId,
+        })
+        .select("id")
+        .single();
+
+      try {
+        // Espaça os envios (menos o primeiro) para não disparar em rajada
+        if (results.waSent > 0) await sleep(WA_DELAY_MS);
+        await sendWhatsAppText(number, msg);
+        results.waSent++;
+        results.waParcelas += grupo.length;
+        if (nlog?.id)
+          await supabase
+            .from("notification_log")
+            .update({ status: "enviado" })
+            .eq("id", nlog.id);
+      } catch (e) {
+        // Libera todas as parcelas do grupo para nova tentativa no mesmo dia
+        await supabase
+          .from("whatsapp_reminders_log")
+          .delete()
+          .in(
+            "installment_id",
+            grupo.map((p) => p.instId)
+          )
+          .eq("bucket", bucket)
+          .eq("sent_on", todayStr);
+        if (nlog?.id)
+          await supabase
+            .from("notification_log")
+            .update({
+              status: "falhou",
+              error: String((e as Error)?.message || e),
+            })
+            .eq("id", nlog.id);
+        results.errors.push("wa:" + String((e as Error)?.message || e));
       }
     }
 
